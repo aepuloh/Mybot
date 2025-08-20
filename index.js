@@ -5,7 +5,6 @@ const bodyParser = require("body-parser");
 const axios = require("axios");
 const { Parser } = require("json2csv");
 const { Pool } = require("pg");
-const crypto = global.crypto || require("crypto").webcrypto;
 
 const app = express();
 app.use(bodyParser.json());
@@ -15,38 +14,68 @@ const TOKEN = process.env.TOKEN;
 const ADMIN_KEY = process.env.ADMIN_KEY || "admin123";
 const PORT = process.env.PORT || 3000;
 const BASE_HOST =
-  process.env.RAILWAY_STATIC_URL || "mybot-production-2f94.up.railway.app";
+  process.env.RAILWAY_STATIC_URL || "mybot-production-xxxx.up.railway.app";
+const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!TOKEN) {
   console.error("❌ TOKEN belum di-set. Tambahkan env TOKEN di Railway.");
   process.exit(1);
 }
+if (!DATABASE_URL) {
+  console.error("❌ DATABASE_URL belum di-set di Railway.");
+  process.exit(1);
+}
+
+// ====================== DATABASE ======================
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+// Buat table kalau belum ada
+(async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      user_id BIGINT PRIMARY KEY,
+      points INT DEFAULT 0,
+      history TEXT[]
+    )
+  `);
+})();
+
+// helper db
+async function getUser(user_id) {
+  const res = await pool.query("SELECT * FROM users WHERE user_id=$1", [user_id]);
+  return res.rows[0];
+}
+
+async function addUser(user_id) {
+  await pool.query(
+    "INSERT INTO users (user_id, points, history) VALUES ($1, 0, $2) ON CONFLICT (user_id) DO NOTHING",
+    [user_id, []]
+  );
+}
+
+async function updatePoints(user_id, pts, note) {
+  await pool.query(
+    "UPDATE users SET points = points + $1, history = array_append(history, $2) WHERE user_id=$3",
+    [pts, note, user_id]
+  );
+}
 
 // ====================== BOT (Webhook Mode) ======================
-const bot = new TelegramBot(TOKEN);
+const bot = new TelegramBot(TOKEN, { webHook: true });
 bot.setWebHook(`https://${BASE_HOST}/bot${TOKEN}`);
 
 app.post(`/bot${TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
-// ====================== DATABASE (JSON File) ======================
-const dbFile = path.join(__dirname, "users.json");
-let users = {};
-if (fs.existsSync(dbFile)) {
-  users = JSON.parse(fs.readFileSync(dbFile));
-}
-function saveDB() {
-  fs.writeFileSync(dbFile, JSON.stringify(users, null, 2));
-}
 
 // ====================== TELEGRAM BOT ======================
-bot.onText(/\/start/, (msg) => {
+bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
-  if (!users[chatId]) {
-    users[chatId] = { points: 0, history: [] };
-    saveDB();
-  }
+  await addUser(chatId);
 
   const opts = {
     reply_markup: {
@@ -62,20 +91,21 @@ bot.onText(/\/start/, (msg) => {
 });
 
 // handler tombol menu
-bot.on("message", (msg) => {
+bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  if (!users[chatId]) return;
+  let user = await getUser(chatId);
+  if (!user) return;
 
   if (text === "💰 Cek Poin") {
-    bot.sendMessage(chatId, `💎 Saldo poin kamu: ${users[chatId].points}`);
+    bot.sendMessage(chatId, `💎 Saldo poin kamu: ${user.points}`);
   }
 
   if (text === "🎬 Nonton Iklan") {
     bot.sendMessage(
       chatId,
-      `🎥 Klik link berikut untuk menonton iklan:\nhttps://${process.env.RAILWAY_STATIC_URL || "mybot-production-e6ef.up.railway.app"}/watch?user_id=${chatId}`
+      `🎥 Klik link berikut untuk menonton iklan:\nhttps://${BASE_HOST}/watch?user_id=${chatId}`
     );
   }
 
@@ -84,18 +114,19 @@ bot.on("message", (msg) => {
   }
 
   if (text === "📜 Riwayat") {
-    if (users[chatId].history.length === 0) {
+    if (!user.history || user.history.length === 0) {
       bot.sendMessage(chatId, "📭 Belum ada riwayat transaksi.");
     } else {
-      bot.sendMessage(chatId, "📜 Riwayat:\n" + users[chatId].history.join("\n"));
+      bot.sendMessage(chatId, "📜 Riwayat:\n" + user.history.join("\n"));
     }
   }
 });
 
 // ====================== WEB: IKLAN ======================
-app.get("/watch", (req, res) => {
+app.get("/watch", async (req, res) => {
   const { user_id } = req.query;
-  if (!user_id || !users[user_id]) return res.send("User tidak ditemukan");
+  const user = await getUser(user_id);
+  if (!user) return res.send("User tidak ditemukan");
 
   res.send(`
     <html>
@@ -119,12 +150,12 @@ app.get("/watch", (req, res) => {
 });
 
 // reward setelah nonton
-app.get("/reward", (req, res) => {
+app.get("/reward", async (req, res) => {
   const { user_id } = req.query;
-  if (!user_id || !users[user_id]) return res.send("User tidak ditemukan");
-  users[user_id].points += 10;
-  users[user_id].history.push(`+10 poin dari iklan (${new Date().toLocaleString()})`);
-  saveDB();
+  const user = await getUser(user_id);
+  if (!user) return res.send("User tidak ditemukan");
+
+  await updatePoints(user_id, 10, `+10 poin dari iklan (${new Date().toLocaleString()})`);
   res.send("Reward diberikan");
 });
 
@@ -173,13 +204,14 @@ app.get("/admin", (req, res) => {
 });
 
 // export user ke CSV
-app.get("/export", (req, res) => {
+app.get("/export", async (req, res) => {
   if (req.query.key !== ADMIN_KEY) return res.send("❌ Unauthorized");
 
-  const data = Object.keys(users).map((id) => ({
-    user_id: id,
-    points: users[id].points,
-    history: users[id].history.join("; ")
+  const result = await pool.query("SELECT * FROM users");
+  const data = result.rows.map((u) => ({
+    user_id: u.user_id,
+    points: u.points,
+    history: (u.history || []).join("; ")
   }));
 
   const parser = new Parser({ fields: ["user_id", "points", "history"] });
@@ -194,7 +226,7 @@ app.get("/export", (req, res) => {
 app.get("/", (req, res) => res.send("🚀 Bot is running on Railway!"));
 setInterval(() => {
   axios
-    .get(`https://${process.env.RAILWAY_STATIC_URL || "mybot-production-e6ef.up.railway.app"}`)
+    .get(`https://${BASE_HOST}`)
     .then(() => console.log("🔄 Keep alive ping sent"))
     .catch(() => console.log("⚠️ Ping failed"));
 }, 5 * 60 * 1000);

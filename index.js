@@ -124,42 +124,40 @@ bot.on("message", async (msg) => {
 
 // ====================== WEB: IKLAN ======================
 app.get("/watch", async (req, res) => {
-  capp.get("/watch", async (req, res) => {
   const { user_id } = req.query;
   const user = await getUser(user_id);
   if (!user) return res.send("User tidak ditemukan");
 
-  res.send(`
-    <html>
-      <head>
-        <title>Nonton Iklan</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-        <script src="https://ad.gigapub.tech/script?id=1669"></script>
-      </head>
-      <body style="text-align:center;font-family:sans-serif;">
-        <h2>🎬 Tonton Iklan Berikut</h2>
+  res.send(`<!DOCTYPE html>
+<html>
+  <head>
+    <title>Nonton Iklan</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <script src="https://ad.gigapub.tech/script?id=1669"></script>
+  </head>
+  <body style="text-align:center;font-family:sans-serif;">
+    <h2>🎬 Tonton Iklan Berikut</h2>
 
-        <script>
-          document.addEventListener("DOMContentLoaded", function() {
-            if (typeof window.showGiga === "function") {
-              window.showGiga()
+    <script>
+      document.addEventListener("DOMContentLoaded", function() {
+        if (typeof window.showGiga === "function") {
+          window.showGiga()
+            .then(() => {
+              fetch("/reward?user_id=${user_id}")
                 .then(() => {
-                  fetch('/reward?user_id=${user_id}')
-                    .then(() => {
-                      document.body.innerHTML += "<p>✅ Kamu mendapat 10 poin!</p>";
-                    });
-                })
-                .catch(e => {
-                  document.body.innerHTML += "<p>❌ Error: " + e + "</p>";
+                  document.body.innerHTML += "<p>✅ Kamu mendapat 10 poin!</p>";
                 });
-            } else {
-              document.body.innerHTML += "<p>⚠️ Script iklan tidak aktif.</p>";
-            }
-          });
-        </script>
-      </body>
-    </html>
-  `);
+            })
+            .catch(e => {
+              document.body.innerHTML += "<p>❌ Error: " + e + "</p>";
+            });
+        } else {
+          document.body.innerHTML += "<p>⚠️ Script iklan tidak aktif.</p>";
+        }
+      });
+    </script>
+  </body>
+</html>`);
 });
 
 // reward setelah nonton

@@ -124,7 +124,6 @@ bot.on("message", async (msg) => {
 
 // ====================== WEB: IKLAN ======================
 app.get("/watch", async (req, res) => {
-app.get("/watch", async (req, res) => {
   const { user_id } = req.query;
   const user = await getUser(user_id);
   if (!user) return res.send("User tidak ditemukan");

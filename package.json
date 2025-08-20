@@ -6,10 +6,10 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.7.2",
-    "express": "^4.19.2",
-    "node-telegram-bot-api": "^0.66.1",
-    "json2csv": "^6.0.0",
-    "body-parser": "^1.20.2"
+    "axios": "*",
+    "express": "*",
+    "node-telegram-bot-api": "*",
+    "json2csv": "*",
+    "body-parser": "*"
   }
 }

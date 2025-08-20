@@ -130,19 +130,39 @@ app.get("/watch", async (req, res) => {
 
   res.send(`
     <html>
-      <head><title>Nonton Iklan</title></head>
+      <head>
+        <title>Nonton Iklan</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      </head>
       <body style="text-align:center;font-family:sans-serif;">
         <h2>🎬 Tonton Iklan Berikut</h2>
-        <script src="https://ad.gigapub.tech/script?id=1669"></script>
+        <div id="ad-container" style="margin:20px auto;"></div>
+
+        <script src="https://ad.gigapub.tech/script?id=${process.env.GIGAPUB_PROJECT_ID || 'YOUR_PROJECT_ID'}"></script>
         <script>
-          window.showGiga()
-            .then(() => {
-              fetch('/reward?user_id=${user_id}');
-              document.body.innerHTML += "<p>✅ Kamu mendapat 10 poin!</p>";
-            })
-            .catch(e => {
-              document.body.innerHTML += "<p>❌ Gagal menampilkan iklan.</p>";
-            });
+          document.addEventListener("DOMContentLoaded", function() {
+            // Fallback logic apabila showGiga tidak tersedia
+            if (window.showGiga === undefined && window.AdGigaFallback !== undefined) {
+              window.showGiga = () => window.AdGigaFallback();
+            }
+
+            if (typeof window.showGiga === "function") {
+              window.showGiga("ad-container")
+                .then(() => {
+                  // Setelah selesai nonton iklan, baru berikan reward
+                  return fetch('/reward?user_id=${user_id}');
+                })
+                .then(() => {
+                  document.body.innerHTML += "<p>✅ Kamu mendapat 10 poin!</p>";
+                })
+                .catch(e => {
+                  console.error(e);
+                  document.body.innerHTML += "<p>❌ Gagal menampilkan iklan atau memberikan reward.</p>";
+                });
+            } else {
+              document.body.innerHTML += "<p>❌ Script iklan gagal dimuat.</p>";
+            }
+          });
         </script>
       </body>
     </html>

@@ -157,9 +157,9 @@ app.get("/watch", async (req, res) => {
                     statusEl.textContent = "✅ Kamu mendapat 10 poin!";
                     // tunggu 2 detik lalu auto balik ke Telegram
                     setTimeout(() => {
-                      window.location.href = "https://t.me/AddsRewards_bot";
+                      window.location.href = "https://t.me/Addsstargaze_bot";
                       // atau pakai schema langsung ke app:
-                      // window.location.href = "tg://resolve?domain=AddsRewards_bot";
+                      // window.location.href = "tg://resolve?domain=Addsstargaze_bot";
                     }, 2000);
                   });
               }

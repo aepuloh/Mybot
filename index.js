@@ -1,23 +1,35 @@
-// index.js — Telegram Ads Bot + Admin Panel (Railway Ready)
-// ====================== DEPENDENCIES ======================
+// index.js — Telegram Ads Bot + Admin Panel (Railway + PostgreSQL + Webhook)
 const TelegramBot = require("node-telegram-bot-api");
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
 const { Parser } = require("json2csv");
+const { Pool } = require("pg");
+const crypto = global.crypto || require("crypto").webcrypto;
 
 const app = express();
 app.use(bodyParser.json());
 
 // ====================== CONFIG ======================
-const TOKEN = process.env.TOKEN; // Token Bot dari @BotFather
-const ADMIN_KEY = process.env.ADMIN_KEY || "admin123"; // ganti di Railway ENV
+const TOKEN = process.env.TOKEN;
+const ADMIN_KEY = process.env.ADMIN_KEY || "admin123";
 const PORT = process.env.PORT || 3000;
+const BASE_HOST =
+  process.env.RAILWAY_STATIC_URL || "mybot-production-2f94.up.railway.app";
 
-const bot = new TelegramBot(TOKEN, { polling: true });
+if (!TOKEN) {
+  console.error("❌ TOKEN belum di-set. Tambahkan env TOKEN di Railway.");
+  process.exit(1);
+}
 
+// ====================== BOT (Webhook Mode) ======================
+const bot = new TelegramBot(TOKEN);
+bot.setWebHook(`https://${BASE_HOST}/bot${TOKEN}`);
+
+app.post(`/bot${TOKEN}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
 // ====================== DATABASE (JSON File) ======================
 const dbFile = path.join(__dirname, "users.json");
 let users = {};

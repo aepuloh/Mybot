@@ -124,6 +124,7 @@ bot.on("message", async (msg) => {
 
 // ====================== WEB: IKLAN ======================
 app.get("/watch", async (req, res) => {
+  capp.get("/watch", async (req, res) => {
   const { user_id } = req.query;
   const user = await getUser(user_id);
   if (!user) return res.send("User tidak ditemukan");
@@ -133,34 +134,26 @@ app.get("/watch", async (req, res) => {
       <head>
         <title>Nonton Iklan</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <script src="https://ad.gigapub.tech/script?id=1669"></script>
       </head>
       <body style="text-align:center;font-family:sans-serif;">
         <h2>🎬 Tonton Iklan Berikut</h2>
-        <div id="ad-container" style="margin:20px auto;"></div>
 
-        <script src="https://ad.gigapub.tech/script?id=${process.env.GIGAPUB_PROJECT_ID || 'YOUR_PROJECT_ID'}"></script>
         <script>
           document.addEventListener("DOMContentLoaded", function() {
-            // Fallback logic apabila showGiga tidak tersedia
-            if (window.showGiga === undefined && window.AdGigaFallback !== undefined) {
-              window.showGiga = () => window.AdGigaFallback();
-            }
-
             if (typeof window.showGiga === "function") {
-              window.showGiga("ad-container")
+              window.showGiga()
                 .then(() => {
-                  // Setelah selesai nonton iklan, baru berikan reward
-                  return fetch('/reward?user_id=${user_id}');
-                })
-                .then(() => {
-                  document.body.innerHTML += "<p>✅ Kamu mendapat 10 poin!</p>";
+                  fetch('/reward?user_id=${user_id}')
+                    .then(() => {
+                      document.body.innerHTML += "<p>✅ Kamu mendapat 10 poin!</p>";
+                    });
                 })
                 .catch(e => {
-                  console.error(e);
-                  document.body.innerHTML += "<p>❌ Gagal menampilkan iklan atau memberikan reward.</p>";
+                  document.body.innerHTML += "<p>❌ Error: " + e + "</p>";
                 });
             } else {
-              document.body.innerHTML += "<p>❌ Script iklan gagal dimuat.</p>";
+              document.body.innerHTML += "<p>⚠️ Script iklan tidak aktif.</p>";
             }
           });
         </script>

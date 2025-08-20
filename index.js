@@ -124,6 +124,7 @@ bot.on("message", async (msg) => {
 
 // ====================== WEB: IKLAN ======================
 app.get("/watch", async (req, res) => {
+app.get("/watch", async (req, res) => {
   const { user_id } = req.query;
   const user = await getUser(user_id);
   if (!user) return res.send("User tidak ditemukan");
@@ -137,20 +138,36 @@ app.get("/watch", async (req, res) => {
   </head>
   <body style="text-align:center;font-family:sans-serif;">
     <h2>🎬 Tonton Iklan Berikut</h2>
+    <p id="status">⏳ Tunggu 15 detik...</p>
 
     <script>
       document.addEventListener("DOMContentLoaded", function() {
         if (typeof window.showGiga === "function") {
-          window.showGiga()
-            .then(() => {
-              fetch("/reward?user_id=${user_id}")
-                .then(() => {
-                  document.body.innerHTML += "<p>✅ Kamu mendapat 10 poin!</p>";
-                });
-            })
-            .catch(e => {
-              document.body.innerHTML += "<p>❌ Error: " + e + "</p>";
-            });
+          window.showGiga().then(() => {
+            let countdown = 15; // detik nonton
+            const statusEl = document.getElementById("status");
+
+            const interval = setInterval(() => {
+              countdown--;
+              if (countdown > 0) {
+                statusEl.textContent = "⏳ Tunggu " + countdown + " detik...";
+              } else {
+                clearInterval(interval);
+                fetch("/reward?user_id=${user_id}")
+                  .then(() => {
+                    statusEl.textContent = "✅ Kamu mendapat 10 poin!";
+                    // tunggu 2 detik lalu auto balik ke Telegram
+                    setTimeout(() => {
+                      window.location.href = "https://t.me/AddsRewards_bot";
+                      // atau pakai schema langsung ke app:
+                      // window.location.href = "tg://resolve?domain=AddsRewards_bot";
+                    }, 2000);
+                  });
+              }
+            }, 1000);
+          }).catch(e => {
+            document.body.innerHTML += "<p>❌ Gagal memuat iklan.</p>";
+          });
         } else {
           document.body.innerHTML += "<p>⚠️ Script iklan tidak aktif.</p>";
         }

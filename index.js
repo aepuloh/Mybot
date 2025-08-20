@@ -14,7 +14,7 @@ const TOKEN = process.env.TOKEN;
 const ADMIN_KEY = process.env.ADMIN_KEY || "admin123";
 const PORT = process.env.PORT || 3000;
 const BASE_HOST =
-  process.env.RAILWAY_STATIC_URL || "mybot-production-xxxx.up.railway.app";
+  process.env.RAILWAY_STATIC_URL || "mybot-production-2f94.up.railway.app";
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!TOKEN) {

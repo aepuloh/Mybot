@@ -1,13 +1,12 @@
-// index.js — Telegram Ads Bot + Admin Panel + Referral + Daily + Spin + Quiz (Stable)
+// index.js — Telegram Ads Bot + Admin Panel (Users, Ads, Withdraws, Quizzes) + Referral + Daily + Spin + Quiz
 const TelegramBot = require("node-telegram-bot-api");
 const express = require("express");
-const bodyParser = require("body-parser");
 const axios = require("axios");
 const { Parser } = require("json2csv");
 const { Pool } = require("pg");
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
 // ====================== CONFIG ======================
 const TOKEN = process.env.TOKEN;
@@ -18,7 +17,7 @@ const BASE_HOST =
   process.env.RAILWAY_STATIC_URL ||
   ("localhost:" + PORT);
 const DATABASE_URL = process.env.DATABASE_URL;
-const ADMIN_ID = process.env.ADMIN_ID; // optional
+const ADMIN_ID = process.env.ADMIN_ID || ""; // optional
 
 if (!TOKEN) {
   console.error("❌ TOKEN belum di-set.");
@@ -45,7 +44,6 @@ const pool = new Pool({
     )
   `);
 
-  // Tambah kolom opsional bila belum ada
   const userCols = await pool.query(`
     SELECT column_name FROM information_schema.columns WHERE table_name='users'
   `);
@@ -138,7 +136,7 @@ app.post(`/bot${TOKEN}`, (req, res) => {
 });
 
 const waitingWithdraw = new Map();
-const waitingQuiz = new Map(); // chatId -> {q,a,reward}
+const waitingQuiz = new Map();
 
 // ====================== START + REFERRAL ======================
 bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
@@ -156,6 +154,12 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
           50,
           `+50 poin referral dari ${chatId} (${nowLocal()})`
         );
+        if (ADMIN_ID) {
+          bot.sendMessage(
+            ADMIN_ID,
+            `👥 Referral Baru\nReferrer: ${ref_by}\nUser: ${chatId}`
+          );
+        }
         bot.sendMessage(
           ref_by,
           `🎉 Kamu dapat +50 poin dari referral baru: ${chatId}`
@@ -202,7 +206,7 @@ bot.onText(/\/daily/, async (msg) => {
       chatId,
       "⚠️ Kamu sudah klaim bonus harian hari ini. Coba lagi besok."
     );
-    }
+  }
   await updatePoints(chatId, 100, `+100 daily bonus (${nowLocal()})`);
   await pool.query("UPDATE users SET last_daily=$1 WHERE user_id=$2", [
     now,
@@ -233,7 +237,6 @@ bot.onText(/\/quiz/, async (msg) => {
   const chatId = msg.chat.id;
   await addUser(chatId);
 
-  // Ambil soal aktif random dari DB; fallback ke hardcoded jika kosong
   const r = await pool.query(
     "SELECT * FROM quizzes WHERE active=TRUE ORDER BY random() LIMIT 1"
   );
@@ -309,10 +312,7 @@ bot.on("message", async (msg) => {
         soal.reward,
         `+${soal.reward} poin quiz (${nowLocal()})`
       );
-      bot.sendMessage(
-        chatId,
-        `🎉 Benar! Kamu dapat +${soal.reward} poin.`
-      );
+      bot.sendMessage(chatId, `🎉 Benar! Kamu dapat +${soal.reward} poin.`);
     } else {
       bot.sendMessage(chatId, "❌ Jawaban salah. Semangat lagi!");
     }
@@ -410,7 +410,7 @@ app.get("/reward", async (req, res) => {
   res.send("Reward diberikan");
 });
 
-// ====================== ADMIN DATA API ======================
+// ====================== ADMIN API ======================
 function guard(req, res) {
   if (req.query.key !== ADMIN_KEY) {
     res.status(401).json({ error: "Unauthorized" });
@@ -419,7 +419,7 @@ function guard(req, res) {
   return true;
 }
 
-// Users list (fallback aman kalau kolom opsional belum ada)
+// Users
 app.get("/api/users", async (req, res) => {
   if (!guard(req, res)) return;
   try {
@@ -434,8 +434,6 @@ app.get("/api/users", async (req, res) => {
     res.json(r.rows);
   }
 });
-
-// Adjust points (+/-)
 app.post("/api/user/:id/points", async (req, res) => {
   if (!guard(req, res)) return;
   const user_id = parseInt(req.params.id, 10);
@@ -448,8 +446,6 @@ app.post("/api/user/:id/points", async (req, res) => {
   );
   res.json({ success: true });
 });
-
-// Reset points to 0
 app.post("/api/user/:id/reset", async (req, res) => {
   if (!guard(req, res)) return;
   const user_id = parseInt(req.params.id, 10);
@@ -479,12 +475,13 @@ app.post("/api/withdraws/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-// Ads CRUD (biar simpel tanpa key; kalau mau kunci, tambah guard di bawah)
+// Ads (GET publik untuk panel; POST/PUT/DELETE dilindungi)
 app.get("/api/ads", async (_req, res) => {
   const r = await pool.query("SELECT * FROM ads ORDER BY id DESC");
   res.json(r.rows);
 });
 app.post("/api/ads", async (req, res) => {
+  if (!guard(req, res)) return;
   const { title, url, reward, status } = req.body || {};
   if (!title || !url) return res.status(400).json({ error: "Bad params" });
   const r = await pool.query(
@@ -494,6 +491,7 @@ app.post("/api/ads", async (req, res) => {
   res.json(r.rows[0]);
 });
 app.put("/api/ads/:id", async (req, res) => {
+  if (!guard(req, res)) return;
   const { id } = req.params;
   const { title, url, reward, status } = req.body || {};
   if (!title || !url) return res.status(400).json({ error: "Bad params" });
@@ -504,11 +502,12 @@ app.put("/api/ads/:id", async (req, res) => {
   res.json(r.rows[0]);
 });
 app.delete("/api/ads/:id", async (req, res) => {
+  if (!guard(req, res)) return;
   await pool.query("DELETE FROM ads WHERE id=$1", [req.params.id]);
   res.json({ success: true });
 });
 
-// Quiz CRUD (dijaga dengan key)
+// Quizzes
 app.get("/api/quizzes", async (req, res) => {
   if (!guard(req, res)) return;
   const r = await pool.query("SELECT * FROM quizzes ORDER BY id DESC");
@@ -543,13 +542,13 @@ app.delete("/api/quizzes/:id", async (req, res) => {
 
 // Export CSV
 app.get("/export", async (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");
+  if (!guard(req, res)) return;
   const r = await pool.query("SELECT * FROM users");
   const data = r.rows.map((u) => ({
     user_id: u.user_id,
     points: u.points,
     ref_by: u.ref_by || "",
-    created_at: u.created_at,
+    created_at: u.created_at || "",
     history: (u.history || []).join("; "),
   }));
   const parser = new Parser({
@@ -560,75 +559,235 @@ app.get("/export", async (req, res) => {
   res.attachment("users.csv");
   res.send(csv);
 });
-// ====================== ADMIN PANEL (HTML MINIMAL) ======================
+
+// ====================== ADMIN PANEL (HTML) ======================
 app.get("/admin", (req, res) => {
   if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");
   res.type("html").send(`<!DOCTYPE html>
 <html>
 <head>
 <meta charset='utf-8'>
-<title>Admin Panel - Minimal</title>
+<title>Admin Panel</title>
 <meta name='viewport' content='width=device-width,initial-scale=1'/>
 <style>
-  body{font-family:sans-serif;margin:0;padding:14px}
-  table{border-collapse:collapse;width:100%}
-  th,td{border:1px solid #ddd;padding:8px}
+  :root{--pad:12px}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,sans-serif;margin:0;padding:var(--pad);background:#f7f7f9;color:#222}
+  h2,h3{margin:8px 0}
+  nav{margin:8px 0 14px 0}
+  nav button{margin:2px;padding:8px 10px;border:1px solid #ddd;background:#fff;border-radius:10px;cursor:pointer}
+  nav button.active{background:#111;color:#fff;border-color:#111}
+  .wrap{display:block}
+  table{border-collapse:collapse;width:100%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+  th,td{border-bottom:1px solid #eee;padding:10px;font-size:14px}
   th{background:#fafafa;text-align:left}
+  tr:last-child td{border-bottom:none}
   .muted{color:#666;font-size:12px}
-  button{padding:6px;margin:2px}
+  .actions button{padding:6px 8px;margin:0 4px 4px 0;border:1px solid #ddd;background:#fff;border-radius:8px;cursor:pointer}
+  .card{background:#fff;border:1px solid #eee;border-radius:12px;padding:12px;margin:10px 0;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+  input,select{padding:8px;border:1px solid #ddd;border-radius:8px;margin:4px 4px 8px 0}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 </style>
 </head>
 <body>
-<h2>👤 Users</h2>
-<div id='content'>📊 Memuat...</div>
+<h2>⚙️ Admin Panel</h2>
+<nav>
+  <button id='btn-users' onclick="showTab('users')">👤 Users</button>
+  <button id='btn-ads' onclick="showTab('ads')">🎬 Ads</button>
+  <button id='btn-withdraws' onclick="showTab('withdraws')">💵 Withdraws</button>
+  <button id='btn-quizzes' onclick="showTab('quizzes')">❓ Quizzes</button>
+  <a id="btn-export" href="#" style="margin-left:6px;text-decoration:none">
+    <button>⬇️ Export CSV</button>
+  </a>
+</nav>
+
+<div id='tab-users' class='wrap'></div>
+<div id='tab-ads' class='wrap' style='display:none'></div>
+<div id='tab-withdraws' class='wrap' style='display:none'></div>
+<div id='tab-quizzes' class='wrap' style='display:none'></div>
+
 <script>
 function getKey(){return new URLSearchParams(location.search).get('key')||''}
+function api(url,opt){return fetch(url+(url.includes('?')?'&':'?')+'key='+encodeURIComponent(getKey()),opt)}
+function setActive(id){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+  const btn=document.getElementById('btn-'+id); if(btn) btn.classList.add('active');
+}
+function showTab(id){
+  ['users','ads','withdraws','quizzes'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
+  setActive(id);
+  document.getElementById('tab-'+id).style.display='block';
+  if(id==='users') renderUsers();
+  if(id==='ads') renderAds();
+  if(id==='withdraws') renderWithdraws();
+  if(id==='quizzes') renderQuizzes();
+}
+document.getElementById('btn-export').href='/export?key='+encodeURIComponent(getKey());
 
-// ---- Users
+// ===== USERS
 async function renderUsers(){
+  const box=document.getElementById('tab-users');
+  box.innerHTML='<div class="card">📊 Memuat users...</div>';
   try{
-    const r=await fetch('/api/users?key='+encodeURIComponent(getKey()));
-    if(!r.ok) throw new Error('API /api/users gagal: '+r.status);
+    const r=await api('/api/users'); if(!r.ok) throw new Error('HTTP '+r.status);
     const u=await r.json();
-
-    let rows=(u||[]).map(x=>{
-      const uid=JSON.stringify(x.user_id);
-      return '<tr>'+
-        '<td>'+x.user_id+'</td>'+
-        '<td>'+x.points+'</td>'+
-        '<td>'+(x.history?x.history.length:0)+'</td>'+
-        '<td>'+(x.ref_by??'-')+'</td>'+
-        '<td>'+(x.created_at?x.created_at:'-')+'</td>'+
-        '<td>'+
-          '<button onclick="adjPts('+uid+',10)">+10</button>'+
-          '<button onclick="adjPts('+uid+',-10)">-10</button>'+
-          '<button onclick="resetPts('+uid+')">Reset</button>'+
-        '</td>'+
-      '</tr>';
-    }).join('');
+    let rows=(u||[]).map(x=>\`<tr>
+      <td>\${x.user_id}</td>
+      <td>\${x.points}</td>
+      <td><button onclick="showHist(\${JSON.stringify(String(x.user_id))})">Lihat (\${x.history?x.history.length:0})</button></td>
+      <td>\${x.ref_by??'-'}</td>
+      <td>\${x.created_at||'-'}</td>
+      <td class="actions">
+        <button onclick="adjPts(\${JSON.stringify(String(x.user_id))},10)">+10</button>
+        <button onclick="adjPts(\${JSON.stringify(String(x.user_id))},-10)">-10</button>
+        <button onclick="resetPts(\${JSON.stringify(String(x.user_id))})">Reset</button>
+      </td>
+    </tr>\`).join('');
     if(!rows) rows='<tr><td colspan=6 class=muted>Kosong</td></tr>';
-
-    document.getElementById('content').innerHTML =
-      '<table><thead><tr><th>User ID</th><th>Points</th><th>Riwayat</th><th>Ref By</th><th>Created</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    box.innerHTML='<h3>👤 Users</h3><table><thead><tr><th>User ID</th><th>Poin</th><th>Riwayat</th><th>Ref By</th><th>Created</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }catch(e){
-    document.getElementById('content').innerHTML='<div style="color:red">⚠️ '+e.message+'</div>';
+    box.innerHTML='<div class="card" style="color:red">⚠️ Gagal load users: '+e.message+'</div>';
   }
 }
-
 async function adjPts(uid,delta){
-  await fetch('/api/user/'+uid+'/points?key='+encodeURIComponent(getKey()),{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({delta})
-  });
+  await api('/api/user/'+uid+'/points',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delta})});
   renderUsers();
 }
 async function resetPts(uid){
-  await fetch('/api/user/'+uid+'/reset?key='+encodeURIComponent(getKey()),{method:'POST'});
+  await api('/api/user/'+uid+'/reset',{method:'POST'});
   renderUsers();
 }
+async function showHist(uid){
+  try{
+    const r=await api('/api/users'); const u=await r.json();
+    const me=(u||[]).find(v=>String(v.user_id)===String(uid));
+    alert((me?.history||[]).join('\\n')||'Tidak ada riwayat');
+  }catch(_){alert('Tidak bisa memuat riwayat');}
+}
 
-window.onload=()=>renderUsers();
+// ===== ADS
+async function renderAds(){
+  const box=document.getElementById('tab-ads');
+  box.innerHTML='<div class="card">📊 Memuat ads...</div>';
+  try{
+    const r=await fetch('/api/ads'); if(!r.ok) throw new Error('HTTP '+r.status);
+    const ads=await r.json();
+    let rows=(ads||[]).map(a=>\`<tr>
+      <td>\${a.id}</td><td>\${a.title}</td><td>\${a.url}</td><td>\${a.reward}</td><td>\${a.status}</td>
+      <td class="actions">
+        <button onclick="toggleAd(\${a.id}, '\${a.status}'==='active' ? 'paused' : 'active')">Toggle</button>
+        <button onclick="delAd(\${a.id})">Hapus</button>
+      </td>
+    </tr>\`).join('');
+    if(!rows) rows='<tr><td colspan=6 class=muted>Kosong</td></tr>';
+
+    box.innerHTML=
+      '<h3>🎬 Ads</h3>'+
+      '<div class="card">'+
+        '<div class="row">'+
+          '<input id="ad-title" placeholder="Judul" />'+
+          '<input id="ad-url" placeholder="Script URL" style="min-width:260px" />'+
+          '<input id="ad-reward" type="number" placeholder="Reward" value="10" />'+
+          '<select id="ad-status"><option value="active">active</option><option value="paused">paused</option></select>'+
+          '<button onclick="addAd()">Tambah</button>'+
+        '</div>'+
+      '</div>'+
+      '<table><thead><tr><th>ID</th><th>Judul</th><th>URL</th><th>Reward</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }catch(e){
+    box.innerHTML='<div class="card" style="color:red">⚠️ Gagal load ads: '+e.message+'</div>';
+  }
+}
+async function addAd(){
+  const title=document.getElementById('ad-title').value.trim();
+  const url=document.getElementById('ad-url').value.trim();
+  const reward=parseInt(document.getElementById('ad-reward').value||'10',10);
+  const status=document.getElementById('ad-status').value;
+  if(!title||!url){alert('Isi judul & URL');return;}
+  await api('/api/ads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,url,reward,status})});
+  renderAds();
+}
+async function toggleAd(id,next){
+  const r=await fetch('/api/ads'); const ads=await r.json();
+  const a=ads.find(x=>x.id===id);
+  if(!a){alert('Iklan tidak ditemukan');return;}
+  await api('/api/ads/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:a.title,url:a.url,reward:a.reward,status:next})});
+  renderAds();
+}
+async function delAd(id){
+  await api('/api/ads/'+id,{method:'DELETE'});
+  renderAds();
+}
+
+// ===== WITHDRAWS
+async function renderWithdraws(){
+  const box=document.getElementById('tab-withdraws');
+  box.innerHTML='<div class="card">📊 Memuat withdraws...</div>';
+  try{
+    const r=await api('/api/withdraws'); if(!r.ok) throw new Error('HTTP '+r.status);
+    const w=await r.json();
+    let rows=(w||[]).map(x=>\`<tr>
+      <td>\${x.id}</td><td>\${x.user_id}</td><td>\${x.amount}</td><td>\${x.dana_number}</td><td>\${x.status}</td><td>\${x.created_at||'-'}</td>
+      <td class="actions">
+        <button onclick="setWd(\${x.id},'approved')">Approve</button>
+        <button onclick="setWd(\${x.id},'rejected')">Reject</button>
+      </td>
+    </tr>\`).join('');
+    if(!rows) rows='<tr><td colspan=7 class=muted>Kosong</td></tr>';
+    box.innerHTML='<h3>💵 Withdraws</h3><table><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>DANA</th><th>Status</th><th>Created</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }catch(e){
+    box.innerHTML='<div class="card" style="color:red">⚠️ Gagal load withdraws: '+e.message+'</div>';
+  }
+}
+async function setWd(id,status){
+  await api('/api/withdraws/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  renderWithdraws();
+}
+
+// ===== QUIZZES
+async function renderQuizzes(){
+  const box=document.getElementById('tab-quizzes');
+  box.innerHTML='<div class="card">📊 Memuat quizzes...</div>';
+  try{
+    const r=await api('/api/quizzes'); if(!r.ok) throw new Error('HTTP '+r.status);
+    const q=await r.json();
+    let rows=(q||[]).map(x=>\`<tr>
+      <td>\${x.id}</td><td>\${x.question}</td><td>\${x.answer}</td><td>\${x.reward}</td><td>\${x.active}</td><td>\${x.created_at||'-'}</td>
+      <td class="actions">
+        <button onclick="delQuiz(\${x.id})">Hapus</button>
+      </td>
+    </tr>\`).join('');
+    if(!rows) rows='<tr><td colspan=7 class=muted>Kosong</td></tr>';
+
+    box.innerHTML=
+      '<h3>❓ Quizzes</h3>'+
+      '<div class="card">'+
+        '<div class="row">'+
+          '<input id="q-question" placeholder="Pertanyaan" style="min-width:260px" />'+
+          '<input id="q-answer" placeholder="Jawaban" />'+
+          '<input id="q-reward" type="number" placeholder="Reward" value="30" />'+
+          '<select id="q-active"><option value="true">active</option><option value="false">inactive</option></select>'+
+          '<button onclick="addQuiz()">Tambah</button>'+
+        '</div>'+
+      '</div>'+
+      '<table><thead><tr><th>ID</th><th>Pertanyaan</th><th>Jawaban</th><th>Reward</th><th>Active</th><th>Created</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }catch(e){
+    box.innerHTML='<div class="card" style="color:red">⚠️ Gagal load quizzes: '+e.message+'</div>';
+  }
+}
+async function addQuiz(){
+  const question=document.getElementById('q-question').value.trim();
+  const answer=document.getElementById('q-answer').value.trim();
+  const reward=parseInt(document.getElementById('q-reward').value||'30',10);
+  const active=document.getElementById('q-active').value==='true';
+  if(!question||!answer){alert('Isi pertanyaan & jawaban');return;}
+  await api('/api/quizzes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,answer,reward,active})});
+  renderQuizzes();
+}
+async function delQuiz(id){
+  await api('/api/quizzes/'+id,{method:'DELETE'});
+  renderQuizzes();
+}
+
+showTab('users');
 </script>
 </body>
 </html>`);

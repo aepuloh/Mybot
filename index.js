@@ -125,8 +125,6 @@ bot.on("message", async (msg) => {
 // ====================== WEB: IKLAN ======================
 const ads = [
   "https://ad.gigapub.tech/script?id=1669",
-  "https://ad.gigapub.tech/script?id=1512",
-  "https://ad.gigapub.tech/script?id=1511"
 ];
 app.get("/watch", async (req, res) => {
   const { user_id } = req.query;

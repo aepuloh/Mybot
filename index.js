@@ -678,6 +678,15 @@ app.get("/admin", (req, res) => {
 <meta charset="utf-8">
 <title>Admin Panel - Minimal</title>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+// ====================== ADMIN PANEL (HTML MINIMAL) ======================
+app.get("/admin", (req, res) => {
+  if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");
+  res.type("html").send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'>
+<title>Admin Panel - Minimal</title>
+<meta name='viewport' content='width=device-width,initial-scale=1'/>
 <style>
   body{font-family:sans-serif;margin:0;padding:14px}
   table{border-collapse:collapse;width:100%}
@@ -689,7 +698,7 @@ app.get("/admin", (req, res) => {
 </head>
 <body>
 <h2>👤 Users</h2>
-<div id="content">📊 Memuat...</div>
+<div id='content'>📊 Memuat...</div>
 <script>
 function getKey(){return new URLSearchParams(location.search).get('key')||''}
 

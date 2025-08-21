@@ -288,7 +288,7 @@ async function loadAds() {
   tbody.innerHTML = "";
 
   ads.forEach(ad => {
-    tbody.innerHTML += `
+    tbody.innerHTML +=
       <tr>
         <td>${ad.id}</td>
         <td>${ad.title}</td>

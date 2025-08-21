@@ -600,7 +600,14 @@ app.get("/admin", (req, res) => {
 <script>
 // fungsi getKey(), setActive(), loadTab() dst...
 function getKey(){return new URLSearchParams(location.search).get('key')||''}
-function setActive(t){['users','ads','finance','settings','quiz'].forEach(x=>{document.getElementById('tab-'+x).classList.remove('active')});document.getElementById('tab-'+t).classList.add('active')}
+function setActive(t){
+  ['users','ads','finance','settings','quiz'].forEach(x=>{
+    const el = document.getElementById('tab-'+x);
+    if(el) el.classList.remove('active');
+  });
+  const cur = document.getElementById('tab-'+t);
+  if(cur) cur.classList.add('active');
+}
 function loadTab(t){setActive(t); if(t==='users')renderUsers(); if(t==='ads')renderAds(); if(t==='finance')renderFinance(); if(t==='settings')renderSettings(); if(t==='quiz')renderQuiz();}
 
 async function renderUsers(){

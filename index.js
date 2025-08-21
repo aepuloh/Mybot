@@ -104,14 +104,11 @@ bot.setMyCommands([
   { command: "ref", description: "Lihat dan bagikan referral link" },
   { command: "leaderboard", description: "Cek top pengguna" },
   { command: "spin", description: "Lucky Spin harian" },
-  { command: "withdraw", description: "Tarik saldo" }
 ]);
-// Load commands
-require("./commands/ref")(bot, pool);
-require("./commands/daily")(bot, pool);
-require("./commands/leaderboard")(bot, pool);
-require("./commands/spin")(bot, pool);
 
+// ====================== LOAD COMMANDS OTOMATIS ======================
+const loadCommands = require("./loadCommands");  // <-- ini kamu tempel di sini
+loadCommands(bot, pool);                         // <-- dan panggil di sini
 app.post(`/bot${TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);

@@ -282,7 +282,106 @@ app.get("/admin", (req, res) => {
             }
           }
         </script>
+        <script>
+async function loadAds() {
+  const res = await fetch("/api/ads");
+  const ads = await res.json();
+  const tbody = document.getElementById("ads-table-body");
+  tbody.innerHTML = "";
+
+  ads.forEach(ad => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${ad.id}</td>
+        <td>${ad.title}</td>
+        <td><a href="${ad.url}" target="_blank">${ad.url}</a></td>
+        <td>${ad.reward}</td>
+        <td>${ad.status}</td>
+        <td>
+          <button onclick="editAd(${ad.id}, '${ad.title}', '${ad.url}', ${ad.reward}, '${ad.status}')">✏️</button>
+          <button onclick="deleteAd(${ad.id})">🗑️</button>
+        </td>
+      </tr>
+    `;
+  });
+}
+
+// Tambah/Edit Iklan
+document.getElementById("ad-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = document.getElementById("ad-id").value;
+  const title = document.getElementById("ad-title").value;
+  const url = document.getElementById("ad-url").value;
+  const reward = document.getElementById("ad-reward").value;
+  const status = document.getElementById("ad-status").value;
+
+  const method = id ? "PUT" : "POST";
+  const endpoint = id ? `/api/ads/${id}` : "/api/ads";
+
+  await fetch(endpoint, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, url, reward, status })
+  });
+
+  document.getElementById("ad-form").reset();
+  loadAds();
+});
+
+// Edit Iklan
+function editAd(id, title, url, reward, status) {
+  document.getElementById("ad-id").value = id;
+  document.getElementById("ad-title").value = title;
+  document.getElementById("ad-url").value = url;
+  document.getElementById("ad-reward").value = reward;
+  document.getElementById("ad-status").value = status;
+}
+
+// Hapus Iklan
+async function deleteAd(id) {
+  if (confirm("Yakin hapus iklan ini?")) {
+    await fetch(`/api/ads/${id}`, { method: "DELETE" });
+    loadAds();
+  }
+}
+
+// Auto load iklan saat panel dibuka
+window.onload = loadAds;
+</script>
       </body>
+      <div id="ads-section">
+  <h2>📺 Kelola Iklan</h2>
+
+  <!-- Form Tambah/Edit -->
+  <form id="ad-form">
+    <input type="hidden" id="ad-id" />
+    <input type="text" id="ad-title" placeholder="Judul iklan" required />
+    <input type="url" id="ad-url" placeholder="URL iklan" required />
+    <input type="number" id="ad-reward" placeholder="Reward" required />
+    <select id="ad-status">
+      <option value="active">Active</option>
+      <option value="inactive">Inactive</option>
+    </select>
+    <button type="submit">Simpan</button>
+  </form>
+
+  <br />
+
+  <!-- Tabel Ads -->
+  <table border="1" cellpadding="8" cellspacing="0">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Judul</th>
+        <th>URL</th>
+        <th>Reward</th>
+        <th>Status</th>
+        <th>Aksi</th>
+      </tr>
+    </thead>
+    <tbody id="ads-table-body"></tbody>
+  </table>
+</div>
     </html>
   `);
 });
@@ -314,6 +413,53 @@ setInterval(() => {
     .then(() => console.log("🔄 Keep alive ping sent"))
     .catch(() => console.log("⚠️ Ping failed"));
 }, 5 * 60 * 1000);
+
+// === ADS MANAGEMENT API ===
+app.get("/api/ads", async (req, res) => {
+  try {
+    const ads = await pool.query("SELECT * FROM ads ORDER BY id DESC");
+    res.json(ads.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Gagal mengambil data iklan" });
+  }
+});
+
+app.post("/api/ads", async (req, res) => {
+  const { title, url, reward, status } = req.body;
+  try {
+    const result = await pool.query(
+      "INSERT INTO ads (title, url, reward, status) VALUES ($1,$2,$3,$4) RETURNING *",
+      [title, url, reward, status || 'active']
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Gagal menambah iklan" });
+  }
+});
+
+app.put("/api/ads/:id", async (req, res) => {
+  const { id } = req.params;
+  const { title, url, reward, status } = req.body;
+  try {
+    const result = await pool.query(
+      "UPDATE ads SET title=$1, url=$2, reward=$3, status=$4 WHERE id=$5 RETURNING *",
+      [title, url, reward, status, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Gagal update iklan" });
+  }
+});
+
+app.delete("/api/ads/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query("DELETE FROM ads WHERE id=$1", [id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Gagal hapus iklan" });
+  }
+});
 
 // ====================== START SERVER ======================
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

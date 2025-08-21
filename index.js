@@ -603,9 +603,6 @@ function getKey(){return new URLSearchParams(location.search).get('key')||''}
 function setActive(t){['users','ads','finance','settings','quiz'].forEach(x=>{document.getElementById('tab-'+x).classList.remove('active')});document.getElementById('tab-'+t).classList.add('active')}
 function loadTab(t){setActive(t); if(t==='users')renderUsers(); if(t==='ads')renderAds(); if(t==='finance')renderFinance(); if(t==='settings')renderSettings(); if(t==='quiz')renderQuiz();}
 
-// ---- Users
-async function renderUsers(){
-// ---- Users
 async function renderUsers(){
   try{
     const r = await fetch('/api/users?key='+encodeURIComponent(getKey()));
@@ -618,6 +615,7 @@ async function renderUsers(){
         '<td>'+x.points+'</td>'+
         '<td>'+(x.history ? x.history.length : 0)+'</td>'+
         '<td>'+(x.ref_by ?? '-')+'</td>'+
+        '<td>'+(x.created_at ? x.created_at : '-')+'</td>'+
         '<td>'+
           '<button class="adj" data-uid="'+x.user_id+'" data-delta="10">+10</button>'+
           '<button class="adj" data-uid="'+x.user_id+'" data-delta="-10">-10</button>'+
@@ -626,14 +624,13 @@ async function renderUsers(){
       '</tr>';
     }).join('');
 
-    if(!rows) rows='<tr><td colspan=5 class=muted>Kosong</td></tr>';
+    if(!rows) rows='<tr><td colspan=6 class=muted>Kosong</td></tr>';
 
     document.getElementById('content').innerHTML =
       '<div class="row"><a href="/export?key='+encodeURIComponent(getKey())+'">⬇️ Export CSV</a></div>'+
       '<div class="card"><div class="row">Adjust cepat: <input id="uid" type="number" placeholder="User ID"><input id="delta" type="number" placeholder="+/- poin"><button onclick="adjCustom()">Apply</button></div></div>'+
-      '<table><thead><tr><th>User ID</th><th>Points</th><th>Riwayat</th><th>Ref By</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+      '<table><thead><tr><th>User ID</th><th>Points</th><th>Riwayat</th><th>Ref By</th><th>Created At</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
 
-    // tambahkan event listener setelah table render
     document.querySelectorAll('.adj').forEach(btn=>{
       btn.onclick = ()=>adjPts(btn.dataset.uid, parseInt(btn.dataset.delta));
     });

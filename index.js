@@ -605,43 +605,46 @@ function loadTab(t){setActive(t); if(t==='users')renderUsers(); if(t==='ads')ren
 
 // ---- Users
 async function renderUsers(){
+// ---- Users
+async function renderUsers(){
   try{
-    const r=await fetch('/api/users?key='+encodeURIComponent(getKey()));
+    const r = await fetch('/api/users?key='+encodeURIComponent(getKey()));
     if(!r.ok) throw new Error('API /api/users gagal: '+r.status);
-    const u=await r.json();
-    let rows=(u||[]).map(x=>'<tr>'+
-  '<td>'+x.user_id+'</td>'+
-  '<td>'+x.points+'</td>'+
-  '<td>'+(x.history?x.history.length:0)+'</td>'+
-  '<td>'+(x.ref_by??'-')+'</td>'+
-  '<td>'+
-    '<button onclick="adjPts(\''+x.user_id+'\',10)">+10</button>'+
-    '<button onclick="adjPts(\''+x.user_id+'\',-10)">-10</button>'+
-    '<button onclick="resetPts(\''+x.user_id+'\')">Reset</button>'+
-  '</td>'+
-'</tr>').join('');
+    const u = await r.json();
+
+    let rows = (u||[]).map(x=>{
+      return '<tr>'+
+        '<td>'+x.user_id+'</td>'+
+        '<td>'+x.points+'</td>'+
+        '<td>'+(x.history ? x.history.length : 0)+'</td>'+
+        '<td>'+(x.ref_by ?? '-')+'</td>'+
+        '<td>'+
+          '<button class="adj" data-uid="'+x.user_id+'" data-delta="10">+10</button>'+
+          '<button class="adj" data-uid="'+x.user_id+'" data-delta="-10">-10</button>'+
+          '<button class="reset" data-uid="'+x.user_id+'">Reset</button>'+
+        '</td>'+
+      '</tr>';
+    }).join('');
+
     if(!rows) rows='<tr><td colspan=5 class=muted>Kosong</td></tr>';
-    document.getElementById('content').innerHTML=
+
+    document.getElementById('content').innerHTML =
       '<div class="row"><a href="/export?key='+encodeURIComponent(getKey())+'">⬇️ Export CSV</a></div>'+
       '<div class="card"><div class="row">Adjust cepat: <input id="uid" type="number" placeholder="User ID"><input id="delta" type="number" placeholder="+/- poin"><button onclick="adjCustom()">Apply</button></div></div>'+
       '<table><thead><tr><th>User ID</th><th>Points</th><th>Riwayat</th><th>Ref By</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+
+    // tambahkan event listener setelah table render
+    document.querySelectorAll('.adj').forEach(btn=>{
+      btn.onclick = ()=>adjPts(btn.dataset.uid, parseInt(btn.dataset.delta));
+    });
+    document.querySelectorAll('.reset').forEach(btn=>{
+      btn.onclick = ()=>resetPts(btn.dataset.uid);
+    });
+
   }catch(e){
-    document.getElementById('content').innerHTML='<div class="error">⚠️ Gagal memuat users: '+e.message+'</div>';
+    document.getElementById('content').innerHTML =
+      '<div class="error">⚠️ Gagal memuat users: '+e.message+'</div>';
   }
-}
-async function adjPts(uid,delta){
-  await fetch('/api/user/'+uid+'/points?key='+encodeURIComponent(getKey()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delta})});
-  renderUsers();
-}
-async function resetPts(uid){
-  await fetch('/api/user/'+uid+'/reset?key='+encodeURIComponent(getKey()),{method:'POST'});
-  renderUsers();
-}
-async function adjCustom(){
-  const uid=document.getElementById('uid').value.trim(); const delta=+document.getElementById('delta').value.trim();
-  if(!uid||!delta) return alert('Isi UID & delta');
-  await fetch('/api/user/'+uid+'/points?key='+encodeURIComponent(getKey()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delta})});
-  renderUsers();
 }
 
 // ---- Ads

@@ -109,9 +109,53 @@ bot.on("message", async (msg) => {
     );
   }
 
-  if (text === "💵 Withdraw") {
-    bot.sendMessage(chatId, "💸 Fitur withdraw masih dalam pengembangan.");
+  // ===== WITHDRAW =====
+if (text === "💵 Withdraw") {
+  const user = await getUser(chatId);
+  if (!user || user.points < 10000) { // minimal 10000 poin (contoh)
+    bot.sendMessage(chatId, "⚠️ Saldo kamu belum cukup untuk withdraw.\nMinimal 10.000 poin.");
+  } else {
+    bot.sendMessage(chatId, "💳 Masukkan nomor DANA kamu untuk withdraw:");
+    // simpan state user sementara
+    if (!global.waitingWithdraw) global.waitingWithdraw = {};
+    global.waitingWithdraw[chatId] = true;
   }
+}
+
+// menangkap nomor DANA setelah user diminta
+bot.on("message", async (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text;
+
+  if (global.waitingWithdraw && global.waitingWithdraw[chatId]) {
+    const user = await getUser(chatId);
+    const danaNumber = text;
+
+    // simpan request withdraw ke database (atau bisa langsung kirim ke admin)
+    await pool.query(
+      "INSERT INTO withdraw_requests (user_id, amount, dana_number, status) VALUES ($1, $2, $3, $4)",
+      [chatId, user.points, danaNumber, "pending"]
+    );
+
+    // reset state
+    delete global.waitingWithdraw[chatId];
+
+    // kirim ke user
+    bot.sendMessage(
+      chatId,
+      `✅ Permintaan withdraw sebesar ${user.points} poin (≈Rp${user.points}) telah dikirim.\nNomor DANA: ${danaNumber}\n\nSilakan tunggu admin memproses.`
+    );
+
+    // kirim notifikasi ke admin
+    bot.sendMessage(
+      process.env.ADMIN_ID,
+      `📥 Request Withdraw Baru:\n\n👤 User: ${chatId}\n💰 Jumlah: ${user.points} poin\n💳 DANA: ${danaNumber}`
+    );
+
+    // kosongkan saldo user
+    await pool.query("UPDATE users SET points = 0 WHERE user_id=$1", [chatId]);
+  }
+});
 
   if (text === "📜 Riwayat") {
     if (!user.history || user.history.length === 0) {

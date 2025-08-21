@@ -352,36 +352,140 @@ window.onload = loadAds;
       <div id="ads-section">
   <h2>📺 Kelola Iklan</h2>
 
-  <!-- Form Tambah/Edit -->
-  <form id="ad-form">
-    <input type="hidden" id="ad-id" />
-    <input type="text" id="ad-title" placeholder="Judul iklan" required />
-    <input type="url" id="ad-url" placeholder="URL iklan" required />
-    <input type="number" id="ad-reward" placeholder="Reward" required />
-    <select id="ad-status">
-      <option value="active">Active</option>
-      <option value="inactive">Inactive</option>
-    </select>
-    <button type="submit">Simpan</button>
-  </form>
+app.get("/admin", (req, res) => {
+  if (req.query.key !== ADMIN_KEY) return res.send("❌ Unauthorized");
 
-  <br />
+  res.send(`
+    <html>
+      <head>
+        <title>Admin Panel</title>
+        <style>
+          body { font-family: sans-serif; margin:0; padding:0; }
+          .tabbar { position: fixed; bottom:0; left:0; right:0; display:flex; border-top:1px solid #ccc; }
+          .tab { flex:1; text-align:center; padding:10px; background:#f9f9f9; cursor:pointer; }
+          .content { padding:20px; margin-bottom:60px; }
+        </style>
+      </head>
+      <body>
+        <div class="content" id="content">📊 Pilih menu admin di bawah</div>
 
-  <!-- Tabel Ads -->
-  <table border="1" cellpadding="8" cellspacing="0">
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Judul</th>
-        <th>URL</th>
-        <th>Reward</th>
-        <th>Status</th>
-        <th>Aksi</th>
-      </tr>
-    </thead>
-    <tbody id="ads-table-body"></tbody>
-  </table>
-</div>
+        <div id="ads-section">
+          <h2>📺 Kelola Iklan</h2>
+          <!-- Form Tambah/Edit -->
+          <form id="ad-form">
+            <input type="hidden" id="ad-id" />
+            <input type="text" id="ad-title" placeholder="Judul iklan" required />
+            <input type="url" id="ad-url" placeholder="URL iklan" required />
+            <input type="number" id="ad-reward" placeholder="Reward" required />
+            <select id="ad-status">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <button type="submit">Simpan</button>
+          </form>
+          <br />
+          <!-- Tabel Ads -->
+          <table border="1" cellpadding="8" cellspacing="0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Judul</th>
+                <th>URL</th>
+                <th>Reward</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="ads-table-body"></tbody>
+          </table>
+        </div>
+
+        <div class="tabbar">
+          <div class="tab" onclick="load('users')">👤 Users</div>
+          <div class="tab" onclick="load('ads')">🎬 Ads</div>
+          <div class="tab" onclick="load('finance')">💰 Finance</div>
+          <div class="tab" onclick="load('settings')">⚙️ Settings</div>
+        </div>
+
+        <script>
+          function load(tab){
+            if(tab==='users'){
+              document.getElementById('content').innerHTML =
+                '<h3>👤 Kelola Users</h3><a href="/export?key=\\${ADMIN_KEY}">⬇️ Export CSV</a>';
+            }
+            if(tab==='ads'){
+              document.getElementById('content').innerHTML = document.getElementById("ads-section").outerHTML;
+              loadAds();
+            }
+            if(tab==='finance'){
+              document.getElementById('content').innerHTML = '<h3>💰 Kelola Finance</h3>';
+            }
+            if(tab==='settings'){
+              document.getElementById('content').innerHTML = '<h3>⚙️ Settings</h3>';
+            }
+          }
+
+          async function loadAds() {
+            const res = await fetch("/api/ads");
+            const ads = await res.json();
+            const tbody = document.getElementById("ads-table-body");
+            tbody.innerHTML = "";
+            ads.forEach(ad => {
+              tbody.innerHTML += \`
+                <tr>
+                  <td>\${ad.id}</td>
+                  <td>\${ad.title}</td>
+                  <td><a href="\${ad.url}" target="_blank">\${ad.url}</a></td>
+                  <td>\${ad.reward}</td>
+                  <td>\${ad.status}</td>
+                  <td>
+                    <button onclick="editAd(\${ad.id}, '\${ad.title}', '\${ad.url}', \${ad.reward}, '\${ad.status}')">✏️</button>
+                    <button onclick="deleteAd(\${ad.id})">🗑️</button>
+                  </td>
+                </tr>
+              \`;
+            });
+          }
+
+          document.getElementById("ad-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const id = document.getElementById("ad-id").value;
+            const title = document.getElementById("ad-title").value;
+            const url = document.getElementById("ad-url").value;
+            const reward = document.getElementById("ad-reward").value;
+            const status = document.getElementById("ad-status").value;
+
+            const method = id ? "PUT" : "POST";
+            const endpoint = id ? \`/api/ads/\${id}\` : "/api/ads";
+
+            await fetch(endpoint, {
+              method,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title, url, reward, status })
+            });
+
+            document.getElementById("ad-form").reset();
+            loadAds();
+          });
+
+          function editAd(id, title, url, reward, status) {
+            document.getElementById("ad-id").value = id;
+            document.getElementById("ad-title").value = title;
+            document.getElementById("ad-url").value = url;
+            document.getElementById("ad-reward").value = reward;
+            document.getElementById("ad-status").value = status;
+          }
+
+          async function deleteAd(id) {
+            if (confirm("Yakin hapus iklan ini?")) {
+              await fetch(\`/api/ads/\${id}\`, { method: "DELETE" });
+              loadAds();
+            }
+          }
+
+          window.onload = loadAds;
+        </script>
+      </body>
     </html>
   `);
 });

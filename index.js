@@ -752,7 +752,7 @@ async function renderSettings(){
     '</div></div>';
 }
 
-window.onload=()=>loadTab('users');
+window.onload=()=>renderUsers();
 </script></body></html>`);
 });
 

@@ -143,13 +143,13 @@ app.get("/watch", async (req, res) => {
   </head>
   <body style="text-align:center;font-family:sans-serif;">
     <h2>🎬 Tonton Iklan Berikut</h2>
-    <p id="status">⏳ Tunggu 15 detik...</p>
+    <p id="status">⏳ Tunggu 5 detik...</p>
 
     <script>
       document.addEventListener("DOMContentLoaded", function() {
         if (typeof window.showGiga === "function") {
           window.showGiga().then(() => {
-            let countdown = 15; // detik nonton
+            let countdown = 5; // detik nonton
             const statusEl = document.getElementById("status");
 
             const interval = setInterval(() => {

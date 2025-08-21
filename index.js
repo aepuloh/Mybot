@@ -669,98 +669,78 @@ async function onSubmitAdForm(e){
   const url=document.getElementById('ad-url').value.trim();
   const reward=+document.getElementById('ad-reward').value.trim();
   const status=document.getElementById('ad-status').value;
-  const method=id?'PUT':'POST';
-  const endpoint=id?('/api/ads/'+id):'/api/ads';
-  await fetch(endpoint,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify({title,url,reward,status})});
-  (document.getElementById('ad-form')).reset(); loadAds();
-}
+// ====================== ADMIN PANEL (HTML MINIMAL) ======================
+app.get("/admin", (req, res) => {
+  if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");
+  res.type("html").send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Admin Panel - Minimal</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+  body{font-family:sans-serif;margin:0;padding:14px}
+  table{border-collapse:collapse;width:100%}
+  th,td{border:1px solid #ddd;padding:8px}
+  th{background:#fafafa;text-align:left}
+  .muted{color:#666;font-size:12px}
+  button{padding:6px;margin:2px}
+</style>
+</head>
+<body>
+<h2>👤 Users</h2>
+<div id="content">📊 Memuat...</div>
+<script>
+function getKey(){return new URLSearchParams(location.search).get('key')||''}
 
-// ---- Finance (Withdraws)
-async function renderFinance(){
+// ---- Users
+async function renderUsers(){
   try{
-    const r=await fetch('/api/withdraws?key='+encodeURIComponent(getKey()));
-    if(!r.ok) throw new Error('API /api/withdraws gagal: '+r.status);
-    const w=await r.json();
-    let rows=(w||[]).map(x=>'<tr>'+
-      '<td>'+x.id+'</td>'+
-      '<td>'+x.user_id+'</td>'+
-      '<td>'+x.amount+'</td>'+
-      '<td>'+x.dana_number+'</td>'+
-      '<td>'+x.status+'</td>'+
-      '<td>'+(x.status==='pending'
-        ? '<button onclick="setWdStatus('+x.id+',\\'approved\\')">Approve</button><button onclick="setWdStatus('+x.id+',\\'rejected\\')">Reject</button>'
-        : '-')+'</td>'+
-    '</tr>').join('');
-    if(!rows) rows='<tr><td colspan=6>Kosong</td></tr>';
-    document.getElementById('content').innerHTML='<h3>💰 Withdraws</h3><table><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>DANA</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    const r=await fetch('/api/users?key='+encodeURIComponent(getKey()));
+    if(!r.ok) throw new Error('API /api/users gagal: '+r.status);
+    const u=await r.json();
+
+    let rows=(u||[]).map(x=>{
+      const uid=JSON.stringify(x.user_id);
+      return '<tr>'+
+        '<td>'+x.user_id+'</td>'+
+        '<td>'+x.points+'</td>'+
+        '<td>'+(x.history?x.history.length:0)+'</td>'+
+        '<td>'+(x.ref_by??'-')+'</td>'+
+        '<td>'+(x.created_at?x.created_at:'-')+'</td>'+
+        '<td>'+
+          '<button onclick="adjPts('+uid+',10)">+10</button>'+
+          '<button onclick="adjPts('+uid+',-10)">-10</button>'+
+          '<button onclick="resetPts('+uid+')">Reset</button>'+
+        '</td>'+
+      '</tr>';
+    }).join('');
+    if(!rows) rows='<tr><td colspan=6 class=muted>Kosong</td></tr>';
+
+    document.getElementById('content').innerHTML =
+      '<table><thead><tr><th>User ID</th><th>Points</th><th>Riwayat</th><th>Ref By</th><th>Created</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }catch(e){
-    document.getElementById('content').innerHTML='<div class="error">⚠️ '+e.message+'</div>';
+    document.getElementById('content').innerHTML='<div style="color:red">⚠️ '+e.message+'</div>';
   }
 }
-async function setWdStatus(id,status){
-  await fetch('/api/withdraws/'+id+'?key='+encodeURIComponent(getKey()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
-  renderFinance();
-}
 
-// ---- Quiz
-async function renderQuiz(){
-  const wrap=(html)=>document.getElementById('content').innerHTML=html;
-  wrap('<div class="card"><form id="quiz-form" class="row">'+
-    '<input type="hidden" id="quiz-id">'+
-    '<input type="text" id="quiz-q" placeholder="Pertanyaan" required style="flex:1 1 300px">'+
-    '<input type="text" id="quiz-a" placeholder="Jawaban" required>'+
-    '<input type="number" id="quiz-r" placeholder="Reward (default 30)">'+
-    '<select id="quiz-active"><option value="true">Active</option><option value="false">Inactive</option></select>'+
-    '<button type="submit">Simpan</button></form></div>'+
-    '<table><thead><tr><th>ID</th><th>Pertanyaan</th><th>Jawaban</th><th>Reward</th><th>Active</th><th>Aksi</th></tr></thead><tbody id="quiz-body"><tr><td colspan=6>Memuat...</td></tr></tbody></table>');
-  document.getElementById('quiz-form').addEventListener('submit', onSubmitQuizForm);
-  loadQuiz();
+async function adjPts(uid,delta){
+  await fetch('/api/user/'+uid+'/points?key='+encodeURIComponent(getKey()),{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({delta})
+  });
+  renderUsers();
 }
-async function loadQuiz(){
-  try{
-    const r=await fetch('/api/quizzes?key='+encodeURIComponent(getKey()));
-    if(!r.ok) throw new Error('API /api/quizzes gagal: '+r.status);
-    const qs=await r.json();
-    const tb=document.getElementById('quiz-body'); tb.innerHTML='';
-    qs.forEach(q=>{
-      tb.innerHTML += '<tr>'+
-        '<td>'+q.id+'</td>'+
-        '<td>'+q.question+'</td>'+
-        '<td>'+q.answer+'</td>'+
-        '<td>'+q.reward+'</td>'+
-        '<td>'+q.active+'</td>'+
-        '<td><button onclick="editQuiz('+q.id+',\\''+q.question.replace(/'/g,"\\'")+'\\',\\''+q.answer.replace(/'/g,"\\'")+'\\','+q.reward+','+q.active+')">✏️</button>'+
-        '<button onclick="delQuiz('+q.id+')">🗑️</button></td></tr>';
-    });
-  }catch(e){
-    document.getElementById('content').innerHTML='<div class="error">⚠️ '+e.message+'</div>';
-  }
-}
-function editQuiz(id,q,a,r,act){document.getElementById('quiz-id').value=id;document.getElementById('quiz-q').value=q;document.getElementById('quiz-a').value=a;document.getElementById('quiz-r').value=r;document.getElementById('quiz-active').value=String(act)}
-async function delQuiz(id){await fetch('/api/quizzes/'+id+'?key='+encodeURIComponent(getKey()),{method:'DELETE'});loadQuiz()}
-async function onSubmitQuizForm(e){
-  e.preventDefault();
-  const id=document.getElementById('quiz-id').value.trim();
-  const question=document.getElementById('quiz-q').value.trim();
-  const answer=document.getElementById('quiz-a').value.trim();
-  const reward=+document.getElementById('quiz-r').value.trim() || 30;
-  const active=document.getElementById('quiz-active').value==='true';
-  const method=id?'PUT':'POST';
-  const endpoint=id?('/api/quizzes/'+id):'/api/quizzes';
-  await fetch(endpoint+'?key='+encodeURIComponent(getKey()),{method,headers:{'Content-Type':'application/json'},body:JSON.stringify({question,answer,reward,active})});
-  (document.getElementById('quiz-form')).reset(); loadQuiz();
-}
-
-// ---- Settings placeholder
-async function renderSettings(){
-  document.getElementById('content').innerHTML =
-    '<div class="card"><div class="row">'+
-    '<div class="muted">Tidak ada setting khusus. Gunakan tab lain untuk mengelola data.</div>'+
-    '</div></div>';
+async function resetPts(uid){
+  await fetch('/api/user/'+uid+'/reset?key='+encodeURIComponent(getKey()),{method:'POST'});
+  renderUsers();
 }
 
 window.onload=()=>renderUsers();
-</script></body></html>`);
+</script>
+</body>
+</html>`);
 });
 
 // ====================== KEEP ALIVE ======================

@@ -97,6 +97,21 @@ async function updatePoints(user_id, pts, note) {
 const bot = new TelegramBot(TOKEN, { webHook: true });
 bot.setWebHook(`https://${BASE_HOST}/bot${TOKEN}`);
 
+// ====================== SET COMMANDS ======================
+bot.setMyCommands([
+  { command: "start", description: "Mulai bot" },
+  { command: "daily", description: "Klaim bonus harian" },
+  { command: "ref", description: "Lihat dan bagikan referral link" },
+  { command: "leaderboard", description: "Cek top pengguna" },
+  { command: "spin", description: "Lucky Spin harian" },
+  { command: "withdraw", description: "Tarik saldo" }
+]);
+// Load commands
+require("./commands/ref")(bot, pool);
+require("./commands/daily")(bot, pool);
+require("./commands/leaderboard")(bot, pool);
+require("./commands/spin")(bot, pool);
+
 app.post(`/bot${TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);

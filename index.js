@@ -62,7 +62,16 @@ async function updatePoints(user_id, pts, note) {
     [pts, note, user_id]
   );
 }
-
+async function addUser(user_id) {
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS withdraw_requests (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT,
+    amount INT,
+    dana_number TEXT,
+    status TEXT DEFAULT 'pending'
+  )
+`);
 // ====================== BOT (Webhook Mode) ======================
 const bot = new TelegramBot(TOKEN, { webHook: true });
 bot.setWebHook(`https://${BASE_HOST}/bot${TOKEN}`);

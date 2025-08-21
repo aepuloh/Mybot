@@ -272,7 +272,8 @@ app.get("/admin", (req, res) => {
               document.getElementById('content').innerHTML = '<h3>👤 Kelola Users</h3><a href="/export?key=${ADMIN_KEY}">⬇️ Export CSV</a>';
             }
             if(tab==='ads'){
-              document.getElementById('content').innerHTML = '<h3>🎬 Kelola Ads</h3>';
+              document.getElementById('content').innerHTML = '<h3>🎬 Kelola Ads</h3><table border="1" cellpadding="5"><thead><tr><th>ID</th><th>Title</th><th>URL</th><th>Reward</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="ads-table-body"></tbody></table>';
+              loadAds();
             }
             if(tab==='finance'){
               document.getElementById('content').innerHTML = '<h3>💰 Kelola Finance</h3>';
@@ -281,28 +282,40 @@ app.get("/admin", (req, res) => {
               document.getElementById('content').innerHTML = '<h3>⚙️ Settings</h3>';
             }
           }
-async function loadAds() {
-  const res = await fetch("/api/ads");
-  const ads = await res.json();
-  const tbody = document.getElementById("ads-table-body");
-  tbody.innerHTML = "";
 
-  ads.forEach(ad => {
-    tbody.innerHTML +=
-      <tr>
-        <td>${ad.id}</td>
-        <td>${ad.title}</td>
-        <td><a href="${ad.url}" target="_blank">${ad.url}</a></td>
-        <td>${ad.reward}</td>
-        <td>${ad.status}</td>
-        <td>
-          <button onclick="editAd(${ad.id}, '${ad.title}', '${ad.url}', ${ad.reward}, '${ad.status}')">✏️</button>
-          <button onclick="deleteAd(${ad.id})">🗑️</button>
-        </td>
-      </tr>
-    `;
-  });
-}
+          async function loadAds() {
+            const res = await fetch("/api/ads");
+            const ads = await res.json();
+            const tbody = document.getElementById("ads-table-body");
+            tbody.innerHTML = "";
+
+            ads.forEach(ad => {
+              tbody.innerHTML += 
+                '<tr>' +
+                  '<td>' + ad.id + '</td>' +
+                  '<td>' + ad.title + '</td>' +
+                  '<td><a href="' + ad.url + '" target="_blank">' + ad.url + '</a></td>' +
+                  '<td>' + ad.reward + '</td>' +
+                  '<td>' + ad.status + '</td>' +
+                  '<td>' +
+                    '<button onclick="editAd(' + ad.id + ', \\' ' + ad.title + ' \\' , \\' ' + ad.url + ' \\' ,' + ad.reward + ', \\' ' + ad.status + ' \\')">✏️</button>' +
+                    '<button onclick="deleteAd(' + ad.id + ')">🗑️</button>' +
+                  '</td>' +
+                '</tr>';
+            });
+          }
+
+          function editAd(id, title, url, reward, status){
+            alert("Edit belum dibuat: " + id);
+          }
+          function deleteAd(id){
+            alert("Delete belum dibuat: " + id);
+          }
+        </script>
+      </body>
+    </html>
+  `);
+});
 
 // Tambah/Edit Iklan
 document.getElementById("ad-form").addEventListener("submit", async (e) => {

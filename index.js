@@ -609,12 +609,16 @@ async function renderUsers(){
     if(!r.ok) throw new Error('API /api/users gagal: '+r.status);
     const u=await r.json();
     let rows=(u||[]).map(x=>'<tr>'+
-      '<td>'+x.user_id+'</td>'+
-      '<td>'+x.points+'</td>'+
-      '<td>'+(x.history?x.history.length:0)+'</td>'+
-      '<td>'+(x.ref_by??'-')+'</td>'+
-      '<td><button onclick="adjPts('+x.user_id+',10)">+10</button><button onclick="adjPts('+x.user_id+',-10)">-10</button><button onclick="resetPts('+x.user_id+')">Reset</button></td>'+
-    '</tr>').join('');
+  '<td>'+x.user_id+'</td>'+
+  '<td>'+x.points+'</td>'+
+  '<td>'+(x.history?x.history.length:0)+'</td>'+
+  '<td>'+(x.ref_by??'-')+'</td>'+
+  '<td>'+
+    '<button onclick="adjPts(\''+x.user_id+'\',10)">+10</button>'+
+    '<button onclick="adjPts(\''+x.user_id+'\',-10)">-10</button>'+
+    '<button onclick="resetPts(\''+x.user_id+'\')">Reset</button>'+
+  '</td>'+
+'</tr>').join('');
     if(!rows) rows='<tr><td colspan=5 class=muted>Kosong</td></tr>';
     document.getElementById('content').innerHTML=
       '<div class="row"><a href="/export?key='+encodeURIComponent(getKey())+'">⬇️ Export CSV</a></div>'+

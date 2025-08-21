@@ -1,4 +1,4 @@
-// index.js — Telegram Ads Bot + Admin Panel + Referral + Daily + Spin + Quiz (Final Stable)
+// index.js — Telegram Ads Bot + Admin Panel + Referral + Daily + Spin + Quiz (Stable)
 const TelegramBot = require("node-telegram-bot-api");
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -11,9 +11,12 @@ app.use(bodyParser.json());
 
 // ====================== CONFIG ======================
 const TOKEN = process.env.TOKEN;
-const ADMIN_KEY = process.env.ADMIN_KEY || "admin123";
+const ADMIN_KEY = process.env.ADMIN_KEY || "Snowboy14";
 const PORT = process.env.PORT || 3000;
-const BASE_HOST = process.env.PUBLIC_HOST || process.env.RAILWAY_STATIC_URL || ("localhost:" + PORT); // set PUBLIC_HOST jika perlu
+const BASE_HOST =
+  process.env.PUBLIC_HOST ||
+  process.env.RAILWAY_STATIC_URL ||
+  ("localhost:" + PORT);
 const DATABASE_URL = process.env.DATABASE_URL;
 const ADMIN_ID = process.env.ADMIN_ID; // optional
 
@@ -29,12 +32,11 @@ if (!DATABASE_URL) {
 // ====================== DATABASE ======================
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
 });
 
 // Buat tabel & auto-repair kolom yang dibutuhkan
 (async () => {
-  // users minimal kolom lama
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       user_id BIGINT PRIMARY KEY,
@@ -43,12 +45,11 @@ const pool = new Pool({
     )
   `);
 
-  // Auto-repair kolom users
+  // Tambah kolom opsional bila belum ada
   const userCols = await pool.query(`
     SELECT column_name FROM information_schema.columns WHERE table_name='users'
   `);
-  const cols = userCols.rows.map(r => r.column_name);
-
+  const cols = userCols.rows.map((r) => r.column_name);
   if (!cols.includes("ref_by"))
     await pool.query("ALTER TABLE users ADD COLUMN ref_by BIGINT");
   if (!cols.includes("last_daily"))
@@ -56,7 +57,9 @@ const pool = new Pool({
   if (!cols.includes("last_spin"))
     await pool.query("ALTER TABLE users ADD COLUMN last_spin TIMESTAMP");
   if (!cols.includes("created_at"))
-    await pool.query("ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT NOW()");
+    await pool.query(
+      "ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT NOW()"
+    );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS withdraw_requests (
@@ -94,7 +97,9 @@ const pool = new Pool({
 
 // ===== Helper DB
 async function getUser(user_id) {
-  const res = await pool.query("SELECT * FROM users WHERE user_id=$1", [user_id]);
+  const res = await pool.query("SELECT * FROM users WHERE user_id=$1", [
+    user_id,
+  ]);
   return res.rows[0];
 }
 async function addUser(user_id, ref_by = null) {
@@ -109,6 +114,7 @@ async function updatePoints(user_id, pts, note) {
     [pts, note, user_id]
   );
 }
+const DAY = 24 * 60 * 60 * 1000;
 function nowLocal() {
   return new Date().toLocaleString();
 }
@@ -145,8 +151,15 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       const exist = await getUser(chatId);
       if (!exist) {
         await addUser(chatId, ref_by);
-        await updatePoints(ref_by, 50, `+50 poin referral dari ${chatId} (${nowLocal()})`);
-        bot.sendMessage(ref_by, `🎉 Kamu dapat +50 poin dari referral baru: ${chatId}`);
+        await updatePoints(
+          ref_by,
+          50,
+          `+50 poin referral dari ${chatId} (${nowLocal()})`
+        );
+        bot.sendMessage(
+          ref_by,
+          `🎉 Kamu dapat +50 poin dari referral baru: ${chatId}`
+        );
       }
     } else {
       await addUser(chatId);
@@ -160,10 +173,10 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
       keyboard: [
         ["💰 Cek Poin", "🎬 Nonton Iklan"],
         ["💵 Withdraw", "📜 Riwayat"],
-        ["🎁 Daily Bonus", "🎡 Spin", "❓ Quiz"]
+        ["🎁 Daily Bonus", "🎡 Spin", "❓ Quiz"],
       ],
-      resize_keyboard: true
-    }
+      resize_keyboard: true,
+    },
   });
 });
 
@@ -175,7 +188,7 @@ bot.onText(/\/ref/, async (msg) => {
   bot.sendMessage(
     chatId,
     `🔗 Referral link kamu:\nhttps://t.me/${me.username}?start=ref_${chatId}\n\n` +
-    `Jika ada yang join lewat link ini, kamu dapat +50 poin.`
+      `Jika ada yang join lewat link ini, kamu dapat +50 poin.`
   );
 });
 
@@ -184,11 +197,17 @@ bot.onText(/\/daily/, async (msg) => {
   await addUser(chatId);
   const user = await getUser(chatId);
   const now = new Date();
-  if (user.last_daily && now - new Date(user.last_daily) < 24 * 60 * 60 * 1000) {
-    return bot.sendMessage(chatId, "⚠️ Kamu sudah klaim bonus harian hari ini. Coba lagi besok.");
-  }
+  if (user.last_daily && now - new Date(user.last_daily) < DAY) {
+    return bot.sendMessage(
+      chatId,
+      "⚠️ Kamu sudah klaim bonus harian hari ini. Coba lagi besok."
+    );
+    }
   await updatePoints(chatId, 100, `+100 daily bonus (${nowLocal()})`);
-  await pool.query("UPDATE users SET last_daily=$1 WHERE user_id=$2", [now, chatId]);
+  await pool.query("UPDATE users SET last_daily=$1 WHERE user_id=$2", [
+    now,
+    chatId,
+  ]);
   bot.sendMessage(chatId, "🎁 Kamu klaim +100 poin dari bonus harian!");
 });
 
@@ -197,13 +216,16 @@ bot.onText(/\/spin/, async (msg) => {
   await addUser(chatId);
   const user = await getUser(chatId);
   const now = new Date();
-  if (user.last_spin && now - new Date(user.last_spin) < 24 * 60 * 60 * 1000) {
+  if (user.last_spin && now - new Date(user.last_spin) < DAY) {
     return bot.sendMessage(chatId, "⚠️ Kamu sudah spin hari ini. Coba lagi besok!");
   }
   const rewards = [0, 5, 10, 20, 50, 100];
   const win = rewards[Math.floor(Math.random() * rewards.length)];
   await updatePoints(chatId, win, `Spin: +${win} poin (${nowLocal()})`);
-  await pool.query("UPDATE users SET last_spin=$1 WHERE user_id=$2", [now, chatId]);
+  await pool.query("UPDATE users SET last_spin=$1 WHERE user_id=$2", [
+    now,
+    chatId,
+  ]);
   bot.sendMessage(chatId, `🎡 Hasil spin: ${win} poin!`);
 });
 
@@ -212,11 +234,17 @@ bot.onText(/\/quiz/, async (msg) => {
   await addUser(chatId);
 
   // Ambil soal aktif random dari DB; fallback ke hardcoded jika kosong
-  const r = await pool.query("SELECT * FROM quizzes WHERE active=TRUE ORDER BY random() LIMIT 1");
+  const r = await pool.query(
+    "SELECT * FROM quizzes WHERE active=TRUE ORDER BY random() LIMIT 1"
+  );
   let soal;
   if (r.rows.length) {
     const row = r.rows[0];
-    soal = { q: row.question, a: String(row.answer).toLowerCase(), reward: row.reward || 30 };
+    soal = {
+      q: row.question,
+      a: String(row.answer).toLowerCase(),
+      reward: row.reward || 30,
+    };
   } else {
     const basic = [
       { q: "Ibukota Indonesia?", a: "jakarta", reward: 30 },
@@ -227,12 +255,17 @@ bot.onText(/\/quiz/, async (msg) => {
     soal.a = soal.a.toLowerCase();
   }
   waitingQuiz.set(chatId, soal);
-  bot.sendMessage(chatId, `❓ Quiz:\n${soal.q}\n\nKetik jawabanmu (1x kesempatan).`);
+  bot.sendMessage(
+    chatId,
+    `❓ Quiz:\n${soal.q}\n\nKetik jawabanmu (1x kesempatan).`
+  );
 });
 
 bot.onText(/\/leaderboard/, async (msg) => {
   const chatId = msg.chat.id;
-  const r = await pool.query("SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10");
+  const r = await pool.query(
+    "SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10"
+  );
   const lines = r.rows.map((u, i) => `${i + 1}. ${u.user_id} — ${u.points} pts`);
   bot.sendMessage(chatId, `🏆 Leaderboard:\n` + (lines.join("\n") || "Kosong"));
 });
@@ -252,9 +285,15 @@ bot.on("message", async (msg) => {
       [chatId, user?.points || 0, danaNumber, "pending"]
     );
     waitingWithdraw.delete(chatId);
-    bot.sendMessage(chatId, `✅ Withdraw ${user.points} poin dikirim ke ${danaNumber}`);
+    bot.sendMessage(
+      chatId,
+      `✅ Withdraw ${user.points} poin dikirim ke ${danaNumber}`
+    );
     if (ADMIN_ID) {
-      bot.sendMessage(ADMIN_ID, `📥 Withdraw Baru\nUser: ${chatId}\nJumlah: ${user.points}\nDANA: ${danaNumber}`);
+      bot.sendMessage(
+        ADMIN_ID,
+        `📥 Withdraw Baru\nUser: ${chatId}\nJumlah: ${user.points}\nDANA: ${danaNumber}`
+      );
     }
     await pool.query("UPDATE users SET points=0 WHERE user_id=$1", [chatId]);
     return;
@@ -265,8 +304,15 @@ bot.on("message", async (msg) => {
     const soal = waitingQuiz.get(chatId);
     waitingQuiz.delete(chatId);
     if (text === soal.a) {
-      await updatePoints(chatId, soal.reward, `+${soal.reward} poin quiz (${nowLocal()})`);
-      bot.sendMessage(chatId, `🎉 Benar! Kamu dapat +${soal.reward} poin.`);
+      await updatePoints(
+        chatId,
+        soal.reward,
+        `+${soal.reward} poin quiz (${nowLocal()})`
+      );
+      bot.sendMessage(
+        chatId,
+        `🎉 Benar! Kamu dapat +${soal.reward} poin.`
+      );
     } else {
       bot.sendMessage(chatId, "❌ Jawaban salah. Semangat lagi!");
     }
@@ -277,21 +323,34 @@ bot.on("message", async (msg) => {
   const user = await getUser(chatId);
   if (!user) return;
 
-  if (text === "💰 cek poin") return bot.sendMessage(chatId, `💎 Poin kamu: ${user.points}`);
+  if (text === "💰 cek poin")
+    return bot.sendMessage(chatId, `💎 Poin kamu: ${user.points}`);
+
   if (text === "🎬 nonton iklan") {
     const me = await bot.getMe();
-    return bot.sendMessage(chatId, `🎥 Klik:\nhttps://${BASE_HOST}/watch?user_id=${chatId}&b=${me.username}`);
+    return bot.sendMessage(
+      chatId,
+      `🎥 Klik:\nhttps://${BASE_HOST}/watch?user_id=${chatId}&b=${me.username}`
+    );
   }
+
   if (text === "💵 withdraw") {
-    if (user.points < 10000) return bot.sendMessage(chatId, "⚠️ Minimal 10.000 poin untuk withdraw");
+    if (user.points < 10000)
+      return bot.sendMessage(
+        chatId,
+        "⚠️ Minimal 10.000 poin untuk withdraw"
+      );
     bot.sendMessage(chatId, "💳 Masukkan nomor DANA kamu:");
     waitingWithdraw.set(chatId, true);
     return;
   }
+
   if (text === "📜 riwayat") {
-    if (!user.history?.length) return bot.sendMessage(chatId, "📭 Belum ada riwayat");
+    if (!user.history?.length)
+      return bot.sendMessage(chatId, "📭 Belum ada riwayat");
     return bot.sendMessage(chatId, "📜 Riwayat:\n" + user.history.join("\n"));
   }
+
   if (text === "🎁 daily bonus") return bot.emit("text", { chat: msg.chat, text: "/daily" });
   if (text === "🎡 spin") return bot.emit("text", { chat: msg.chat, text: "/spin" });
   if (text === "❓ quiz") return bot.emit("text", { chat: msg.chat, text: "/quiz" });
@@ -304,7 +363,9 @@ app.get("/watch", async (req, res) => {
   if (!user) return res.send("User tidak ditemukan");
   const me = b || (await bot.getMe()).username;
 
-  const adRes = await pool.query("SELECT * FROM ads WHERE status='active' ORDER BY id DESC LIMIT 1");
+  const adRes = await pool.query(
+    "SELECT * FROM ads WHERE status='active' ORDER BY id DESC LIMIT 1"
+  );
   const ad = adRes.rows[0];
   const scriptUrl = ad?.url || "https://ad.gigapub.tech/script?id=1669";
   const reward = ad?.reward || 10;
@@ -350,7 +411,6 @@ app.get("/reward", async (req, res) => {
 });
 
 // ====================== ADMIN DATA API ======================
-// Auth helper untuk endpoint yang sensitif
 function guard(req, res) {
   if (req.query.key !== ADMIN_KEY) {
     res.status(401).json({ error: "Unauthorized" });
@@ -359,15 +419,18 @@ function guard(req, res) {
   return true;
 }
 
-// Users list (dengan fallback kolom)
+// Users list (fallback aman kalau kolom opsional belum ada)
 app.get("/api/users", async (req, res) => {
   if (!guard(req, res)) return;
   try {
-    const r = await pool.query("SELECT user_id,points,history,ref_by,created_at FROM users ORDER BY user_id DESC");
+    const r = await pool.query(
+      "SELECT user_id,points,history,ref_by,created_at FROM users ORDER BY user_id DESC"
+    );
     res.json(r.rows);
-  } catch (e) {
-    console.error("⚠️ /api/users fallback:", e.message);
-    const r = await pool.query("SELECT user_id,points,history FROM users ORDER BY user_id DESC");
+  } catch (_e) {
+    const r = await pool.query(
+      "SELECT user_id,points,history FROM users ORDER BY user_id DESC"
+    );
     res.json(r.rows);
   }
 });
@@ -378,7 +441,11 @@ app.post("/api/user/:id/points", async (req, res) => {
   const user_id = parseInt(req.params.id, 10);
   const delta = parseInt(req.body?.delta || 0, 10);
   if (!user_id || !delta) return res.status(400).json({ error: "Bad params" });
-  await updatePoints(user_id, delta, `${delta>=0?'+':''}${delta} by admin (${nowLocal()})`);
+  await updatePoints(
+    user_id,
+    delta,
+    `${delta >= 0 ? "+" : ""}${delta} by admin (${nowLocal()})`
+  );
   res.json({ success: true });
 });
 
@@ -394,20 +461,25 @@ app.post("/api/user/:id/reset", async (req, res) => {
 // Withdraws
 app.get("/api/withdraws", async (req, res) => {
   if (!guard(req, res)) return;
-  const r = await pool.query("SELECT * FROM withdraw_requests ORDER BY id DESC");
+  const r = await pool.query(
+    "SELECT * FROM withdraw_requests ORDER BY id DESC"
+  );
   res.json(r.rows);
 });
 app.post("/api/withdraws/:id", async (req, res) => {
   if (!guard(req, res)) return;
   const id = parseInt(req.params.id, 10);
   const st = (req.body?.status || "").toLowerCase();
-  if (!["approved", "rejected", "pending"].includes(st)) return res.status(400).json({ error: "Bad status" });
-  await pool.query("UPDATE withdraw_requests SET status=$1 WHERE id=$2", [st, id]);
+  if (!["approved", "rejected", "pending"].includes(st))
+    return res.status(400).json({ error: "Bad status" });
+  await pool.query("UPDATE withdraw_requests SET status=$1 WHERE id=$2", [
+    st,
+    id,
+  ]);
   res.json({ success: true });
 });
 
-// Ads CRUD (GET open; POST/PUT/DELETE pakai JSON dari admin panel—dibiarkan tanpa key agar panel simple)
-// NOTE: kalau mau aman, tambahkan guard pada POST/PUT/DELETE.
+// Ads CRUD (biar simpel tanpa key; kalau mau kunci, tambah guard di bawah)
 app.get("/api/ads", async (_req, res) => {
   const r = await pool.query("SELECT * FROM ads ORDER BY id DESC");
   res.json(r.rows);
@@ -415,14 +487,20 @@ app.get("/api/ads", async (_req, res) => {
 app.post("/api/ads", async (req, res) => {
   const { title, url, reward, status } = req.body || {};
   if (!title || !url) return res.status(400).json({ error: "Bad params" });
-  const r = await pool.query("INSERT INTO ads (title,url,reward,status) VALUES ($1,$2,$3,$4) RETURNING *", [title, url, reward || 10, status || "active"]);
+  const r = await pool.query(
+    "INSERT INTO ads (title,url,reward,status) VALUES ($1,$2,$3,$4) RETURNING *",
+    [title, url, reward || 10, status || "active"]
+  );
   res.json(r.rows[0]);
 });
 app.put("/api/ads/:id", async (req, res) => {
   const { id } = req.params;
   const { title, url, reward, status } = req.body || {};
   if (!title || !url) return res.status(400).json({ error: "Bad params" });
-  const r = await pool.query("UPDATE ads SET title=$1,url=$2,reward=$3,status=$4 WHERE id=$5 RETURNING *", [title, url, reward || 10, status || "active", id]);
+  const r = await pool.query(
+    "UPDATE ads SET title=$1,url=$2,reward=$3,status=$4 WHERE id=$5 RETURNING *",
+    [title, url, reward || 10, status || "active", id]
+  );
   res.json(r.rows[0]);
 });
 app.delete("/api/ads/:id", async (req, res) => {
@@ -467,14 +545,16 @@ app.delete("/api/quizzes/:id", async (req, res) => {
 app.get("/export", async (req, res) => {
   if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");
   const r = await pool.query("SELECT * FROM users");
-  const data = r.rows.map(u => ({
+  const data = r.rows.map((u) => ({
     user_id: u.user_id,
     points: u.points,
     ref_by: u.ref_by || "",
     created_at: u.created_at,
-    history: (u.history || []).join("; ")
+    history: (u.history || []).join("; "),
   }));
-  const parser = new Parser({ fields: ["user_id", "points", "ref_by", "created_at", "history"] });
+  const parser = new Parser({
+    fields: ["user_id", "points", "ref_by", "created_at", "history"],
+  });
   const csv = parser.parse(data);
   res.header("Content-Type", "text/csv");
   res.attachment("users.csv");
@@ -499,6 +579,7 @@ app.get("/admin", (req, res) => {
   th,td{border:1px solid #ddd;padding:8px}
   th{background:#fafafa;text-align:left}
   .muted{color:#666;font-size:12px}
+  .error{color:#c00;font-weight:bold}
   input,select,button{padding:8px;margin:4px}
   .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .card{border:1px solid #eee;border-radius:10px;padding:12px;margin:8px 0}
@@ -525,8 +606,9 @@ function loadTab(t){setActive(t); if(t==='users')renderUsers(); if(t==='ads')ren
 async function renderUsers(){
   try{
     const r=await fetch('/api/users?key='+encodeURIComponent(getKey()));
+    if(!r.ok) throw new Error('API /api/users gagal: '+r.status);
     const u=await r.json();
-    let rows=u.map(x=>'<tr>'+
+    let rows=(u||[]).map(x=>'<tr>'+
       '<td>'+x.user_id+'</td>'+
       '<td>'+x.points+'</td>'+
       '<td>'+(x.history?x.history.length:0)+'</td>'+
@@ -539,7 +621,7 @@ async function renderUsers(){
       '<div class="card"><div class="row">Adjust cepat: <input id="uid" type="number" placeholder="User ID"><input id="delta" type="number" placeholder="+/- poin"><button onclick="adjCustom()">Apply</button></div></div>'+
       '<table><thead><tr><th>User ID</th><th>Points</th><th>Riwayat</th><th>Ref By</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }catch(e){
-    document.getElementById('content').innerHTML='<p style="color:red">Gagal memuat users: '+e.message+'</p>';
+    document.getElementById('content').innerHTML='<div class="error">⚠️ Gagal memuat users: '+e.message+'</div>';
   }
 }
 async function adjPts(uid,delta){
@@ -572,18 +654,23 @@ async function renderAds(){
   loadAds();
 }
 async function loadAds(){
-  const r=await fetch('/api/ads'); const ads=await r.json().catch(()=>[]);
-  const tb=document.getElementById('ads-body'); tb.innerHTML='';
-  ads.forEach(a=>{
-    tb.innerHTML+= '<tr>'+
-      '<td>'+a.id+'</td>'+
-      '<td>'+a.title+'</td>'+
-      '<td><a href="'+a.url+'" target="_blank">'+a.url+'</a></td>'+
-      '<td>'+a.reward+'</td>'+
-      '<td>'+a.status+'</td>'+
-      '<td><button onclick="editAd('+a.id+',\\''+a.title.replace(/'/g,"\\'")+'\\',\\''+a.url.replace(/'/g,"\\'")+'\\','+a.reward+',\\''+a.status+'\\')">✏️</button>'+
-      '<button onclick="deleteAd('+a.id+')">🗑️</button></td></tr>';
-  });
+  try{
+    const r=await fetch('/api/ads'); if(!r.ok) throw new Error('API /api/ads gagal: '+r.status);
+    const ads=await r.json();
+    const tb=document.getElementById('ads-body'); tb.innerHTML='';
+    ads.forEach(a=>{
+      tb.innerHTML+= '<tr>'+
+        '<td>'+a.id+'</td>'+
+        '<td>'+a.title+'</td>'+
+        '<td><a href="'+a.url+'" target="_blank">'+a.url+'</a></td>'+
+        '<td>'+a.reward+'</td>'+
+        '<td>'+a.status+'</td>'+
+        '<td><button onclick="editAd('+a.id+',\\''+a.title.replace(/'/g,"\\'")+'\\',\\''+a.url.replace(/'/g,"\\'")+'\\','+a.reward+',\\''+a.status+'\\')">✏️</button>'+
+        '<button onclick="deleteAd('+a.id+')">🗑️</button></td></tr>';
+    });
+  }catch(e){
+    document.getElementById('content').innerHTML='<div class="error">⚠️ '+e.message+'</div>';
+  }
 }
 function editAd(id,t,u,r,s){document.getElementById('ad-id').value=id;document.getElementById('ad-title').value=t;document.getElementById('ad-url').value=u;document.getElementById('ad-reward').value=r;document.getElementById('ad-status').value=s}
 async function deleteAd(id){await fetch('/api/ads/'+id,{method:'DELETE'});loadAds()}
@@ -602,19 +689,25 @@ async function onSubmitAdForm(e){
 
 // ---- Finance (Withdraws)
 async function renderFinance(){
-  const r=await fetch('/api/withdraws?key='+encodeURIComponent(getKey())); const w=await r.json().catch(()=>[]);
-  let rows=w.map(x=>'<tr>'+
-    '<td>'+x.id+'</td>'+
-    '<td>'+x.user_id+'</td>'+
-    '<td>'+x.amount+'</td>'+
-    '<td>'+x.dana_number+'</td>'+
-    '<td>'+x.status+'</td>'+
-    '<td>'+(x.status==='pending'
-      ? '<button onclick="setWdStatus('+x.id+',\\'approved\\')">Approve</button><button onclick="setWdStatus('+x.id+',\\'rejected\\')">Reject</button>'
-      : '-')+'</td>'+
-  '</tr>').join('');
-  if(!rows) rows='<tr><td colspan=6>Kosong</td></tr>';
-  document.getElementById('content').innerHTML='<h3>💰 Withdraws</h3><table><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>DANA</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  try{
+    const r=await fetch('/api/withdraws?key='+encodeURIComponent(getKey()));
+    if(!r.ok) throw new Error('API /api/withdraws gagal: '+r.status);
+    const w=await r.json();
+    let rows=(w||[]).map(x=>'<tr>'+
+      '<td>'+x.id+'</td>'+
+      '<td>'+x.user_id+'</td>'+
+      '<td>'+x.amount+'</td>'+
+      '<td>'+x.dana_number+'</td>'+
+      '<td>'+x.status+'</td>'+
+      '<td>'+(x.status==='pending'
+        ? '<button onclick="setWdStatus('+x.id+',\\'approved\\')">Approve</button><button onclick="setWdStatus('+x.id+',\\'rejected\\')">Reject</button>'
+        : '-')+'</td>'+
+    '</tr>').join('');
+    if(!rows) rows='<tr><td colspan=6>Kosong</td></tr>';
+    document.getElementById('content').innerHTML='<h3>💰 Withdraws</h3><table><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>DANA</th><th>Status</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }catch(e){
+    document.getElementById('content').innerHTML='<div class="error">⚠️ '+e.message+'</div>';
+  }
 }
 async function setWdStatus(id,status){
   await fetch('/api/withdraws/'+id+'?key='+encodeURIComponent(getKey()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
@@ -623,7 +716,7 @@ async function setWdStatus(id,status){
 
 // ---- Quiz
 async function renderQuiz(){
-  const wrap = (html)=>document.getElementById('content').innerHTML=html;
+  const wrap=(html)=>document.getElementById('content').innerHTML=html;
   wrap('<div class="card"><form id="quiz-form" class="row">'+
     '<input type="hidden" id="quiz-id">'+
     '<input type="text" id="quiz-q" placeholder="Pertanyaan" required style="flex:1 1 300px">'+
@@ -636,18 +729,24 @@ async function renderQuiz(){
   loadQuiz();
 }
 async function loadQuiz(){
-  const r = await fetch('/api/quizzes?key='+encodeURIComponent(getKey())); const qs = await r.json().catch(()=>[]);
-  const tb = document.getElementById('quiz-body'); tb.innerHTML='';
-  qs.forEach(q=>{
-    tb.innerHTML += '<tr>'+
-      '<td>'+q.id+'</td>'+
-      '<td>'+q.question+'</td>'+
-      '<td>'+q.answer+'</td>'+
-      '<td>'+q.reward+'</td>'+
-      '<td>'+q.active+'</td>'+
-      '<td><button onclick="editQuiz('+q.id+',\\''+q.question.replace(/'/g,"\\'")+'\\',\\''+q.answer.replace(/'/g,"\\'")+'\\','+q.reward+','+q.active+')">✏️</button>'+
-      '<button onclick="delQuiz('+q.id+')">🗑️</button></td></tr>';
-  });
+  try{
+    const r=await fetch('/api/quizzes?key='+encodeURIComponent(getKey()));
+    if(!r.ok) throw new Error('API /api/quizzes gagal: '+r.status);
+    const qs=await r.json();
+    const tb=document.getElementById('quiz-body'); tb.innerHTML='';
+    qs.forEach(q=>{
+      tb.innerHTML += '<tr>'+
+        '<td>'+q.id+'</td>'+
+        '<td>'+q.question+'</td>'+
+        '<td>'+q.answer+'</td>'+
+        '<td>'+q.reward+'</td>'+
+        '<td>'+q.active+'</td>'+
+        '<td><button onclick="editQuiz('+q.id+',\\''+q.question.replace(/'/g,"\\'")+'\\',\\''+q.answer.replace(/'/g,"\\'")+'\\','+q.reward+','+q.active+')">✏️</button>'+
+        '<button onclick="delQuiz('+q.id+')">🗑️</button></td></tr>';
+    });
+  }catch(e){
+    document.getElementById('content').innerHTML='<div class="error">⚠️ '+e.message+'</div>';
+  }
 }
 function editQuiz(id,q,a,r,act){document.getElementById('quiz-id').value=id;document.getElementById('quiz-q').value=q;document.getElementById('quiz-a').value=a;document.getElementById('quiz-r').value=r;document.getElementById('quiz-active').value=String(act)}
 async function delQuiz(id){await fetch('/api/quizzes/'+id+'?key='+encodeURIComponent(getKey()),{method:'DELETE'});loadQuiz()}
@@ -678,7 +777,9 @@ window.onload=()=>loadTab('users');
 
 // ====================== KEEP ALIVE ======================
 app.get("/", (_req, res) => res.send("🚀 Bot is running"));
-setInterval(() => { axios.get(`https://${BASE_HOST}`).catch(() => {}) }, 300000);
+setInterval(() => {
+  axios.get(`https://${BASE_HOST}`).catch(() => {});
+}, 300000);
 
 // ====================== START SERVER ======================
 app.listen(PORT, () => console.log(`✅ Server running on ${PORT}`));

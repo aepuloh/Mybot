@@ -11,7 +11,7 @@ app.use(bodyParser.json());
 
 // ====================== CONFIG ======================
 const TOKEN = process.env.TOKEN;
-const ADMIN_KEY = process.env.ADMIN_KEY || "admin123";
+const ADMIN_KEY = process.env.ADMIN_KEY || "Snowboy14";
 const PORT = process.env.PORT || 3000;
 const BASE_HOST = process.env.RAILWAY_STATIC_URL || "localhost:" + PORT;
 const DATABASE_URL = process.env.DATABASE_URL;

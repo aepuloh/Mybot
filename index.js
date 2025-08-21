@@ -474,33 +474,186 @@ app.get("/admin", (req, res) => {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ title, url, reward, status })
             });
+app.get("/admin", (req, res) => {
+  if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");
 
-            document.getElementById("ad-form").reset();
-            loadAds();
-          });
+  res.type("html").send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Admin Panel</title>
+  <style>
+    body { font-family: sans-serif; margin:0; padding:0; }
+    .tabbar { position: fixed; bottom:0; left:0; right:0; display:flex; border-top:1px solid #ccc; background:#f9f9f9; }
+    .tab { flex:1; text-align:center; padding:10px; cursor:pointer; user-select:none; }
+    .tab:hover { background:#eee; }
+    .content { padding:20px; margin-bottom:60px; }
+    table { border-collapse: collapse; width:100%; }
+    th, td { border:1px solid #ddd; padding:8px; }
+    th { background:#fafafa; text-align:left; }
+    form input, form select, form button { margin:4px 6px 4px 0; padding:6px 8px; }
+  </style>
+</head>
+<body>
+  <div class="content" id="content">📊 Pilih menu admin di bawah</div>
 
-          function editAd(id, title, url, reward, status) {
-            document.getElementById("ad-id").value = id;
-            document.getElementById("ad-title").value = title;
-            document.getElementById("ad-url").value = url;
-            document.getElementById("ad-reward").value = reward;
-            document.getElementById("ad-status").value = status;
-          }
+  <div class="tabbar">
+    <div class="tab" onclick="loadTab('users')">👤 Users</div>
+    <div class="tab" onclick="loadTab('ads')">🎬 Ads</div>
+    <div class="tab" onclick="loadTab('finance')">💰 Finance</div>
+    <div class="tab" onclick="loadTab('settings')">⚙️ Settings</div>
+  </div>
 
-          async function deleteAd(id) {
-            if (confirm("Yakin hapus iklan ini?")) {
-              await fetch(\`/api/ads/\${id}\`, { method: "DELETE" });
-              loadAds();
-            }
-          }
+  <script>
+    // Helper ambil ?key= dari URL agar link export tetap pakai key yang sama
+    function getAdminKey() {
+      const params = new URLSearchParams(location.search);
+      return params.get('key') || '';
+    }
 
-          window.onload = loadAds;
-        </script>
-      </body>
-    </html>
-  `);
+    function loadTab(tab){
+      if (tab === 'users') {
+        const key = getAdminKey();
+        document.getElementById('content').innerHTML =
+          '<h3>👤 Kelola Users</h3>' +
+          '<p><a id="export-link" href="#">⬇️ Export CSV</a></p>' +
+          '<p>Tambahin tabel users di sini kalau perlu (opsional).</p>';
+        document.getElementById('export-link').href = '/export?key=' + encodeURIComponent(key);
+      }
+
+      if (tab === 'ads') {
+        // Render UI Ads (form + tabel)
+        document.getElementById('content').innerHTML =
+          '<h3>🎬 Kelola Ads</h3>' +
+          '<form id="ad-form">' +
+            '<input type="hidden" id="ad-id" />' +
+            '<input type="text" id="ad-title" placeholder="Judul iklan" required />' +
+            '<input type="url" id="ad-url" placeholder="URL iklan" required />' +
+            '<input type="number" id="ad-reward" placeholder="Reward" required />' +
+            '<select id="ad-status">' +
+              '<option value="active">Active</option>' +
+              '<option value="inactive">Inactive</option>' +
+            '</select>' +
+            '<button type="submit">Simpan</button>' +
+          '</form>' +
+          '<br />' +
+          '<table>' +
+            '<thead>' +
+              '<tr>' +
+                '<th>ID</th><th>Judul</th><th>URL</th><th>Reward</th><th>Status</th><th>Aksi</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody id="ads-table-body"></tbody>' +
+          '</table>';
+
+        // Pasang handler form setelah HTML di-render
+        document.getElementById("ad-form").addEventListener("submit", onSubmitAdForm);
+
+        // Load data ads
+        loadAds();
+      }
+
+      if (tab === 'finance') {
+        document.getElementById('content').innerHTML =
+          '<h3>💰 Kelola Finance</h3>' +
+          '<p>Di sini nanti bisa tampilkan withdraw_requests, verifikasi, dsb.</p>';
+      }
+
+      if (tab === 'settings') {
+        document.getElementById('content').innerHTML =
+          '<h3>⚙️ Settings</h3>' +
+          '<p>Tempat pengaturan dasar.</p>';
+      }
+    }
+
+    // ====== ADS CRUD ======
+
+    async function loadAds() {
+      const res = await fetch("/api/ads");
+      // Jika /api/ads belum dibuat, ini akan error. Pastikan route API sudah ada.
+      const ads = await res.json().catch(() => []);
+      const tbody = document.getElementById("ads-table-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      ads.forEach(function(ad){
+        tbody.innerHTML +=
+          '<tr>' +
+            '<td>' + ad.id + '</td>' +
+            '<td>' + escapeHtml(ad.title) + '</td>' +
+            '<td><a href="' + escapeAttr(ad.url) + '" target="_blank">' + escapeHtml(ad.url) + '</a></td>' +
+            '<td>' + ad.reward + '</td>' +
+            '<td>' + escapeHtml(ad.status) + '</td>' +
+            '<td>' +
+              '<button onclick="editAd(' + Number(ad.id) + ', \'' + jsQuote(ad.title) + '\', \'' + jsQuote(ad.url) + '\',' + Number(ad.reward) + ', \'' + jsQuote(ad.status) + '\')">✏️</button> ' +
+              '<button onclick="deleteAd(' + Number(ad.id) + ')">🗑️</button>' +
+            '</td>' +
+          '</tr>';
+      });
+    }
+
+    function editAd(id, title, url, reward, status) {
+      document.getElementById("ad-id").value = id;
+      document.getElementById("ad-title").value = title;
+      document.getElementById("ad-url").value = url;
+      document.getElementById("ad-reward").value = reward;
+      document.getElementById("ad-status").value = status;
+      // Scroll ke form biar enak
+      document.getElementById("ad-form").scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function deleteAd(id) {
+      if (!confirm("Yakin hapus iklan ini?")) return;
+      await fetch('/api/ads/' + encodeURIComponent(id), { method: 'DELETE' });
+      loadAds();
+    }
+
+    async function onSubmitAdForm(e) {
+      e.preventDefault();
+      const id = document.getElementById("ad-id").value.trim();
+      const title = document.getElementById("ad-title").value.trim();
+      const url = document.getElementById("ad-url").value.trim();
+      const reward = document.getElementById("ad-reward").value.trim();
+      const status = document.getElementById("ad-status").value;
+
+      const method = id ? "PUT" : "POST";
+      const endpoint = id ? ('/api/ads/' + encodeURIComponent(id)) : '/api/ads';
+
+      await fetch(endpoint, {
+        method: method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, url, reward, status })
+      });
+
+      // Reset form & reload
+      document.getElementById("ad-form").reset();
+      loadAds();
+    }
+
+    // ====== Utilities untuk amanin string di HTML/JS ======
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'","&#39;");
+    }
+    function escapeAttr(s) {
+      // sederhana: pakai escapeHtml untuk atribut
+      return escapeHtml(s);
+    }
+    function jsQuote(s) {
+      // escape untuk disisipkan ke dalam atribut onclick dengan tanda kutip tunggal
+      return String(s).replaceAll("\\\\","\\\\\\\\").replaceAll("'","\\\\'");
+    }
+
+    // Default buka tab Ads biar langsung kelihatan
+    window.addEventListener('load', function(){ loadTab('ads'); });
+  </script>
+</body>
+</html>`);
 });
-
 // export user ke CSV
 app.get("/export", async (req, res) => {
   if (req.query.key !== ADMIN_KEY) return res.send("❌ Unauthorized");

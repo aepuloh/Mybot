@@ -281,8 +281,6 @@ app.get("/admin", (req, res) => {
               document.getElementById('content').innerHTML = '<h3>⚙️ Settings</h3>';
             }
           }
-        </script>
-        <script>
 async function loadAds() {
   const res = await fetch("/api/ads");
   const ads = await res.json();

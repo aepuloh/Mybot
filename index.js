@@ -645,39 +645,6 @@ async function loadAds(){
   try{
     const r=await fetch('/api/ads'); if(!r.ok) throw new Error('API /api/ads gagal: '+r.status);
     const ads=await r.json();
-    const tb=document.getElementById('ads-body'); tb.innerHTML='';
-    ads.forEach(a=>{
-      tb.innerHTML+= '<tr>'+
-        '<td>'+a.id+'</td>'+
-        '<td>'+a.title+'</td>'+
-        '<td><a href="'+a.url+'" target="_blank">'+a.url+'</a></td>'+
-        '<td>'+a.reward+'</td>'+
-        '<td>'+a.status+'</td>'+
-        '<td><button onclick="editAd('+a.id+',\\''+a.title.replace(/'/g,"\\'")+'\\',\\''+a.url.replace(/'/g,"\\'")+'\\','+a.reward+',\\''+a.status+'\\')">✏️</button>'+
-        '<button onclick="deleteAd('+a.id+')">🗑️</button></td></tr>';
-    });
-  }catch(e){
-    document.getElementById('content').innerHTML='<div class="error">⚠️ '+e.message+'</div>';
-  }
-}
-function editAd(id,t,u,r,s){document.getElementById('ad-id').value=id;document.getElementById('ad-title').value=t;document.getElementById('ad-url').value=u;document.getElementById('ad-reward').value=r;document.getElementById('ad-status').value=s}
-async function deleteAd(id){await fetch('/api/ads/'+id,{method:'DELETE'});loadAds()}
-async function onSubmitAdForm(e){
-  e.preventDefault();
-  const id=document.getElementById('ad-id').value.trim();
-  const title=document.getElementById('ad-title').value.trim();
-  const url=document.getElementById('ad-url').value.trim();
-  const reward=+document.getElementById('ad-reward').value.trim();
-  const status=document.getElementById('ad-status').value;
-// ====================== ADMIN PANEL (HTML MINIMAL) ======================
-app.get("/admin", (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");
-  res.type("html").send(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Admin Panel - Minimal</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
 // ====================== ADMIN PANEL (HTML MINIMAL) ======================
 app.get("/admin", (req, res) => {
   if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");

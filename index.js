@@ -598,11 +598,6 @@ app.get("/admin", (req, res) => {
   <div id="tab-settings" class="tab" onclick="loadTab('settings')">⚙️ Settings</div>
 </div>
 <script>
-<script>
-window.onerror = function(msg, url, line, col, error) {
-  document.body.innerHTML += '<div style="color:red;padding:8px;border:1px solid red">⚠️ JS Error: '+msg+' (line '+line+')</div>';
-};
-
 // fungsi getKey(), setActive(), loadTab() dst...
 function getKey(){return new URLSearchParams(location.search).get('key')||''}
 function setActive(t){['users','ads','finance','settings','quiz'].forEach(x=>{document.getElementById('tab-'+x).classList.remove('active')});document.getElementById('tab-'+t).classList.add('active')}

@@ -59,7 +59,8 @@ const pool = new Pool({
       title TEXT NOT NULL,
       url TEXT NOT NULL,
       reward INT DEFAULT 10,
-      status TEXT DEFAULT 'active', -- active | inactive
+      -- status kolom untuk menandai iklan aktif / nonaktif
+      status TEXT DEFAULT 'active',
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);

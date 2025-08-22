@@ -367,6 +367,7 @@ bot.on("message", async (msg) => {
   if (text === "🎁 daily bonus") { await handleDaily(chatId); return; }
 if (text === "🎡 spin")        { await handleSpin(chatId);  return; }
 if (text === "❓ quiz")        { await handleQuiz(chatId);  return; }
+});
 // ====================== WEB: IKLAN ======================
 app.get("/watch", async (req, res) => {
   const { user_id, b } = req.query;

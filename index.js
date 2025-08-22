@@ -468,10 +468,29 @@ app.post("/api/withdraws/:id", async (req, res) => {
   const st = (req.body?.status || "").toLowerCase();
   if (!["approved", "rejected", "pending"].includes(st))
     return res.status(400).json({ error: "Bad status" });
+
   await pool.query("UPDATE withdraw_requests SET status=$1 WHERE id=$2", [
     st,
     id,
   ]);
+
+  // 🔔 Tambahkan notifikasi ke user
+  const r = await pool.query("SELECT user_id, amount, dana_number FROM withdraw_requests WHERE id=$1", [id]);
+  if (r.rows.length) {
+    const wd = r.rows[0];
+    if (st === "approved") {
+      bot.sendMessage(
+        wd.user_id,
+        `✅ Withdraw kamu sebesar ${wd.amount} poin ke ${wd.dana_number} sudah *disetujui*.\n\nSilakan cek saldo Dana kamu.`
+      );
+    } else if (st === "rejected") {
+      bot.sendMessage(
+        wd.user_id,
+        `❌ Withdraw kamu sebesar ${wd.amount} poin ke ${wd.dana_number} *ditolak*.\n\nSilakan hubungi admin.`
+      );
+    }
+  }
+
   res.json({ success: true });
 });
 

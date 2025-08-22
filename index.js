@@ -364,10 +364,9 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(chatId, "📜 Riwayat:\n" + user.history.join("\n"));
   }
 
-  if (text === "🎁 daily bonus") return bot.emit("text", { ...msg, text: "/daily" });
-if (text === "🎡 spin") return bot.emit("text", { ...msg, text: "/spin" });
-if (text === "❓ quiz") return bot.emit("text", { ...msg, text: "/quiz" });
-
+  if (text === "🎁 daily bonus") { await handleDaily(chatId); return; }
+if (text === "🎡 spin")        { await handleSpin(chatId);  return; }
+if (text === "❓ quiz")        { await handleQuiz(chatId);  return; }
 // ====================== WEB: IKLAN ======================
 app.get("/watch", async (req, res) => {
   const { user_id, b } = req.query;

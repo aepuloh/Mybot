@@ -48,6 +48,8 @@ const pool = new Pool({
     SELECT column_name FROM information_schema.columns WHERE table_name='users'
   `);
   const cols = userCols.rows.map((r) => r.column_name);
+  if (!cols.includes("last_quiz"))
+  await pool.query("ALTER TABLE users ADD COLUMN last_quiz TIMESTAMP");
   if (!cols.includes("ref_by"))
     await pool.query("ALTER TABLE users ADD COLUMN ref_by BIGINT");
   if (!cols.includes("last_daily"))
@@ -236,6 +238,14 @@ bot.onText(/\/spin/, async (msg) => {
 bot.onText(/\/quiz/, async (msg) => {
   const chatId = msg.chat.id;
   await addUser(chatId);
+  const user = await getUser(chatId);
+  const now = new Date();
+
+  // cek cooldown 3 jam
+  if (user.last_quiz && now - new Date(user.last_quiz) < 3 * 60 * 60 * 1000) {
+    const sisa = Math.ceil((3 * 60 * 60 * 1000 - (now - new Date(user.last_quiz))) / 60000);
+    return bot.sendMessage(chatId, `⚠️ Kamu sudah ikut quiz. Coba lagi dalam ${sisa} menit.`);
+  }
 
   const r = await pool.query(
     "SELECT * FROM quizzes WHERE active=TRUE ORDER BY random() LIMIT 1"
@@ -257,7 +267,10 @@ bot.onText(/\/quiz/, async (msg) => {
     soal = basic[Math.floor(Math.random() * basic.length)];
     soal.a = soal.a.toLowerCase();
   }
+
   waitingQuiz.set(chatId, soal);
+  await pool.query("UPDATE users SET last_quiz=$1 WHERE user_id=$2", [now, chatId]);
+
   bot.sendMessage(
     chatId,
     `❓ Quiz:\n${soal.q}\n\nKetik jawabanmu (1x kesempatan).`

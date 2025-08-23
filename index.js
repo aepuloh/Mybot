@@ -1,33 +1,41 @@
 // ====================== DEPENDENCIES ======================
-// ====== DEPENDENCIES ======
+// ====================== DEPENDENCIES ======================
 const TelegramBot = require("node-telegram-bot-api");
 const express = require("express");
 const axios = require("axios");
 const { Parser } = require("json2csv");
 const { Pool } = require("pg");
 
-// ====== APP INIT ======
-const app = express();
-app.use(express.json());
-
-// ====================== CONFIG ======================
-const TOKEN = process.env.TOKEN;
-const DATABASE_URL = process.env.DATABASE_URL;
-const ADMIN_KEY = process.env.ADMIN_KEY || "Snowboy14";
-const RAILWAY_STATIC_DONAIN = process.env.RAILWAY_STATIC_DOMAIN; // ex: https://domain.com/app
-const PORT = process.env.PORT || 3000;
-
-if (!TOKEN || !DATABASE_URL || !WEBAPP_URL) {
-  console.error("❌ ENV missing. Please set TOKEN, DATABASE_URL, WEBAPP_URL");
-  process.exit(1);
-}
-
-// ====================== APP & DB ======================
+// ====================== APP INIT ======================
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const pool = new Pool({ connectionString: DATABASE_URL });
+// ====================== CONFIG ======================
+const TOKEN = process.env.TOKEN;
+const ADMIN_KEY = process.env.ADMIN_KEY || "Snowboy14";
+const PORT = process.env.PORT || 3000;
+const BASE_HOST =
+  process.env.PUBLIC_HOST ||
+  process.env.RAILWAY_STATIC_URL ||
+  ("localhost:" + PORT);
+const DATABASE_URL = process.env.DATABASE_URL;
+const ADMIN_ID = process.env.ADMIN_ID || ""; // optional
+
+if (!TOKEN) {
+  console.error("❌ TOKEN belum di-set.");
+  process.exit(1);
+}
+if (!DATABASE_URL) {
+  console.error("❌ DATABASE_URL belum di-set.");
+  process.exit(1);
+}
+
+// ====================== DATABASE ======================
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // penting buat Railway Postgres
+});
 
 // ====================== DB INIT (AUTO-REPAIR) ======================
 async function initDB() {

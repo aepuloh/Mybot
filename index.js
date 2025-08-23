@@ -12,6 +12,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ====================== CONFIG ======================
+// ====================== CONFIG ======================
 const TOKEN = process.env.TOKEN;
 const ADMIN_KEY = process.env.ADMIN_KEY || "Snowboy14";
 const PORT = process.env.PORT || 3000;
@@ -21,6 +22,10 @@ const BASE_HOST =
   ("localhost:" + PORT);
 const DATABASE_URL = process.env.DATABASE_URL;
 const ADMIN_ID = process.env.ADMIN_ID || ""; // optional
+
+// 🔥 Tambahin ini
+const WEBAPP_URL =
+  process.env.WEBAPP_URL || `https://${BASE_HOST}/app`;
 
 if (!TOKEN) {
   console.error("❌ TOKEN belum di-set.");

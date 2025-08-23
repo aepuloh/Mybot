@@ -6,8 +6,8 @@ const { Pool } = require("pg");
 // ====================== CONFIG ======================
 const TOKEN = process.env.TOKEN;
 const DATABASE_URL = process.env.DATABASE_URL;
-const ADMIN_KEY = process.env.ADMIN_KEY || "mysecretkey";
-const WEBAPP_URL = process.env.WEBAPP_URL; // ex: https://domain.com/app
+const ADMIN_KEY = process.env.ADMIN_KEY || "Snowboy14";
+const RAILWAY_STATIC_DONAIN = process.env.RAILWAY_STATIC_DOMAIN; // ex: https://domain.com/app
 const PORT = process.env.PORT || 3000;
 
 if (!TOKEN || !DATABASE_URL || !WEBAPP_URL) {

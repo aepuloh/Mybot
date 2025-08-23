@@ -1,7 +1,12 @@
 // ====================== DEPENDENCIES ======================
 const TelegramBot = require("node-telegram-bot-api");
 const express = require("express");
+const axios = require("axios");
+const { Parser } = require("json2csv");
 const { Pool } = require("pg");
+
+const app = express();
+app.use(express.json());
 
 // ====================== CONFIG ======================
 const TOKEN = process.env.TOKEN;

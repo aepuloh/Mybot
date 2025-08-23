@@ -1,17 +1,13 @@
-// ====================== DEPENDENCIES ======================
-// ====================== DEPENDENCIES ======================
+// index.js — Telegram Bot (minimal) + WebApp (game-like UI) + Ads/Withdraw/Leaderboard
 const TelegramBot = require("node-telegram-bot-api");
 const express = require("express");
 const axios = require("axios");
 const { Parser } = require("json2csv");
 const { Pool } = require("pg");
 
-// ====================== APP INIT ======================
 const app = express();
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// ====================== CONFIG ======================
 // ====================== CONFIG ======================
 const TOKEN = process.env.TOKEN;
 const ADMIN_KEY = process.env.ADMIN_KEY || "Snowboy14";
@@ -22,10 +18,6 @@ const BASE_HOST =
   ("localhost:" + PORT);
 const DATABASE_URL = process.env.DATABASE_URL;
 const ADMIN_ID = process.env.ADMIN_ID || ""; // optional
-
-// 🔥 Tambahin ini
-const WEBAPP_URL =
-  process.env.WEBAPP_URL || `https://${BASE_HOST}/app`;
 
 if (!TOKEN) {
   console.error("❌ TOKEN belum di-set.");
@@ -39,30 +31,36 @@ if (!DATABASE_URL) {
 // ====================== DATABASE ======================
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // penting buat Railway Postgres
+  ssl: { rejectUnauthorized: false },
 });
 
-// ====================== DB INIT (AUTO-REPAIR) ======================
-async function initDB() {
+// Buat tabel & auto-repair kolom yang dibutuhkan
+(async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       user_id BIGINT PRIMARY KEY,
-      points BIGINT DEFAULT 0,
-      hashrate INT DEFAULT 1,
-      ref_by BIGINT,
-      history TEXT[],
-      last_daily TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW()
+      points INT DEFAULT 0,
+      history TEXT[]
     )
   `);
+
+  const userCols = await pool.query(`
+    SELECT column_name FROM information_schema.columns WHERE table_name='users'
+  `);
+  const cols = userCols.rows.map((r) => r.column_name);
+  if (!cols.includes("ref_by"))
+    await pool.query("ALTER TABLE users ADD COLUMN ref_by BIGINT");
+  if (!cols.includes("created_at"))
+    await pool.query(
+      "ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT NOW()"
+    );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS withdraw_requests (
       id SERIAL PRIMARY KEY,
       user_id BIGINT,
-      name TEXT,
+      amount INT,
       dana_number TEXT,
-      amount BIGINT,
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW()
     )
@@ -73,498 +71,624 @@ async function initDB() {
       id SERIAL PRIMARY KEY,
       title TEXT NOT NULL,
       url TEXT NOT NULL,
-      reward INT NOT NULL DEFAULT 10,
-      status TEXT NOT NULL DEFAULT 'active', -- active|paused
+      reward INT DEFAULT 10,
+      status TEXT DEFAULT 'active',
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
 
+  // quizzes table kept (admin can still manage) but we won't use it in app by default
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS ad_views (
+    CREATE TABLE IF NOT EXISTS quizzes (
       id SERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL,
-      ad_id INT,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      reward INT DEFAULT 30,
+      active BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+})();
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ad_views_user_day ON ad_views (user_id, created_at)`);
+// ===== Helper DB
+async function getUser(user_id) {
+  const res = await pool.query("SELECT * FROM users WHERE user_id=$1", [
+    user_id,
+  ]);
+  return res.rows[0];
 }
-initDB().catch(console.error);
-
-// ====================== HELPERS ======================
-function nowLocal() {
-  return new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
-}
-
-async function getUser(uid) {
-  const q = await pool.query("SELECT * FROM users WHERE user_id=$1", [uid]);
-  if (q.rowCount === 0) {
-    await pool.query(
-      "INSERT INTO users(user_id, points, hashrate, history) VALUES ($1, 0, 1, $2)",
-      [uid, []]
-    );
-    return (await pool.query("SELECT * FROM users WHERE user_id=$1", [uid])).rows[0];
-  }
-  return q.rows[0];
-}
-
-async function updatePoints(uid, delta, note) {
-  const u = await getUser(uid);
-  const newPts = Number(u.points || 0) + Number(delta || 0);
-  const history = [note, ...(u.history || [])].slice(0, 50);
-  await pool.query("UPDATE users SET points=$1, history=$2 WHERE user_id=$3", [newPts, history, uid]);
-  return newPts;
-}
-
-async function getActiveAd() {
-  const q = await pool.query("SELECT * FROM ads WHERE status='active' ORDER BY RANDOM() LIMIT 1");
-  return q.rows[0] || null;
-}
-
-async function countViewsToday(uid) {
-  const q = await pool.query(
-    "SELECT COUNT(*) FROM ad_views WHERE user_id=$1 AND DATE(created_at)=CURRENT_DATE",
-    [uid]
+async function addUser(user_id, ref_by = null) {
+  await pool.query(
+    "INSERT INTO users (user_id, points, history, ref_by) VALUES ($1, 0, $2, $3) ON CONFLICT (user_id) DO NOTHING",
+    [user_id, [], ref_by]
   );
-  return parseInt(q.rows[0].count || "0", 10);
+}
+async function updatePoints(user_id, pts, note) {
+  await pool.query(
+    "UPDATE users SET points = points + $1, history = array_append(history, $2) WHERE user_id=$3",
+    [pts, note, user_id]
+  );
+}
+function nowLocal() {
+  return new Date().toLocaleString();
 }
 
-// ====================== TELEGRAM BOT (POLos) ======================
-const bot = new TelegramBot(TOKEN, { polling: true });
+// ====================== BOT (Webhook minimal) ======================
+const bot = new TelegramBot(TOKEN, { webHook: true });
+bot.setWebHook(`https://${BASE_HOST}/bot${TOKEN}`);
 
-bot.onText(/\/start/, async (msg) => {
+// Minimal bot commands: start & ref
+bot.setMyCommands([
+  { command: "start", description: "Buka Mini App" },
+  { command: "ref", description: "Lihat referral link" },
+]);
+
+app.post(`/bot${TOKEN}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   const chatId = msg.chat.id;
-  await getUser(chatId);
+  const refArg = match[1];
+
+  if (refArg && refArg.startsWith("ref_")) {
+    const ref_by = parseInt(refArg.replace("ref_", ""), 10);
+    if (ref_by && ref_by !== chatId) {
+      const exist = await getUser(chatId);
+      if (!exist) {
+        await addUser(chatId, ref_by);
+        await updatePoints(
+          ref_by,
+          50,
+          `+50 poin referral dari ${chatId} (${nowLocal()})`
+        );
+        if (ADMIN_ID) {
+          bot.sendMessage(
+            ADMIN_ID,
+            `👥 Referral Baru\nReferrer: ${ref_by}\nUser: ${chatId}`
+          );
+        }
+        try {
+          await bot.sendMessage(
+            ref_by,
+            `🎉 Kamu dapat +50 poin dari referral baru: ${chatId}`
+          );
+        } catch (e) { /* ignore if can't message */ }
+      }
+    } else {
+      await addUser(chatId);
+    }
+  } else {
+    await addUser(chatId);
+  }
+
+  // Send simple message + inline web_app button to open Mini App
+  const me = await bot.getMe();
+  bot.sendMessage(chatId, `Halo! Buka Mini App untuk bermain:`, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "🚀 Buka Mini App",
+            web_app: { url: `https://${BASE_HOST}/app?uid=${chatId}` },
+          },
+        ],
+      ],
+    },
+  });
+});
+
+bot.onText(/\/ref/, async (msg) => {
+  const chatId = msg.chat.id;
+  await addUser(chatId);
+  const me = await bot.getMe();
   bot.sendMessage(
     chatId,
-    "👋 Selamat datang di Hamster Mining!\n\nSemua fitur ada di Mini App. Klik tombol di bawah untuk membuka ⛏️",
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🚀 Buka Mini App", web_app: { url: `${WEBAPP_URL}?uid=${chatId}` } }]
-        ]
-      }
-    }
+    `🔗 Referral link kamu:\nhttps://t.me/${me.username}?start=ref_${chatId}\n\nAjak teman dan dapatkan reward!`
   );
 });
 
-// ====================== WEB MINI APP (Single Page Mining) ======================
+// ====================== WEB: IKLAN (watch & reward remain) ======================
+app.get("/watch", async (req, res) => {
+  const { user_id, b } = req.query;
+  const user = await getUser(user_id);
+  if (!user) return res.send("User tidak ditemukan");
+  const me = b || (await bot.getMe()).username;
+
+  const adRes = await pool.query(
+    "SELECT * FROM ads WHERE status='active' ORDER BY id DESC LIMIT 1"
+  );
+  const ad = adRes.rows[0];
+  const scriptUrl = ad?.url || "https://ad.gigapub.tech/script?id=1669";
+  const reward = ad?.reward || 10;
+
+  res.type("html").send(`<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Nonton Iklan</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:18px;">
+<h2>🎬 Tonton Iklan</h2>
+<p id="status">⏳ Tunggu beberapa detik...</p>
+<script src="${scriptUrl}"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  if (typeof window.showGiga === "function") {
+    window.showGiga().then(() => {
+      let c=5; const s=document.getElementById("status");
+      const i=setInterval(()=>{c--;
+        if(c>0){s.textContent="⏳ Tunggu "+c+" detik...";}
+        else{
+          clearInterval(i);
+          fetch("/reward?user_id=${user_id}&reward=${reward}")
+            .then(()=>{s.textContent="✅ ${reward} poin!"; setTimeout(()=>{location.href="https://t.me/${me}"},1400);});
+        }
+      },1000);
+    }).catch(()=>{document.body.innerHTML+="<p>❌ Gagal load iklan</p>";});
+  } else {document.body.innerHTML+="<p>⚠️ Script iklan tidak aktif</p>";}
+});
+</script>
+</body>
+</html>`);
+});
+
+app.get("/reward", async (req, res) => {
+  const { user_id, reward } = req.query;
+  const user = await getUser(user_id);
+  if (!user) return res.send("User tidak ditemukan");
+  const pts = parseInt(reward || "10", 10);
+  await updatePoints(user_id, pts, `+${pts} poin (watch) (${nowLocal()})`);
+  res.send("Reward diberikan");
+});
+
+// ====================== WEBAPP (single-page) ======================
 app.get("/app", async (req, res) => {
-  const uid = String(req.query.uid || "").trim();
-  if (!uid) return res.status(400).send("Missing uid");
-
+  const uid = req.query.uid;
   const user = await getUser(uid);
-  const me = await bot.getMe();
+  if (!user) {
+    return res
+      .status(404)
+      .send(
+        "User tidak ditemukan. Pastikan kamu membuka App melalui bot Telegram."
+      );
+  }
 
+  // single-file app: tab bar (Home, Quest, Leaderboard, Wallet)
   res.type("html").send(`<!doctype html>
 <html lang="id">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Hamster Mining</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mini Game App</title>
 <style>
-  :root{--p:#6c5ce7;--txt:#222;--bg:#0b0b12;}
-  html,body{margin:0;padding:0;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,sans-serif;overflow:hidden}
-  #bgCanvas{position:fixed;inset:0;z-index:0}
-  .container{position:relative;z-index:1;display:flex;flex-direction:column;min-height:100vh}
-  .header{padding:16px;background:transparent;display:flex;align-items:center;justify-content:space-between}
-  .profile{display:flex;align-items:center;}
-  .avatar{width:48px;height:48px;border-radius:50%;background:#fff1;display:flex;align-items:center;justify-content:center;font-size:26px;color:#ffd86b;margin-right:10px;backdrop-filter:blur(6px);border:1px solid #ffffff22}
-  .pointsTop{font-weight:800;font-size:20px;background:#ffffff17;border:1px solid #ffffff2a;padding:6px 10px;border-radius:12px;backdrop-filter:blur(8px)}
-  .main{flex:1;padding:12px 12px 90px 12px;overflow:auto}
-  .card{background:#ffffff10;border:1px solid #ffffff22;border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.25);margin-bottom:12px;backdrop-filter:blur(10px)}
-  .center{text-align:center}
-  .btn{background:linear-gradient(135deg,#7d5fff,#74b9ff);color:#fff;border:none;border-radius:12px;padding:12px 16px;cursor:pointer;font-weight:700}
-  .btn:disabled{opacity:.6;cursor:not-allowed}
-  .sub{color:#d3d3d3;font-size:13px}
-  input{width:100%;padding:12px;border:1px solid #ffffff33;background:#ffffff12;color:#fff;border-radius:12px;margin:6px 0;outline:none}
-  input::placeholder{color:#bbb}
-  .ham{width:170px;height:170px;border-radius:18px;background:linear-gradient(135deg,#fff1c9,#ffd6e6);display:flex;align-items:center;justify-content:center;font-size:72px;margin:10px auto;cursor:pointer;user-select:none;box-shadow:0 10px 30px rgba(0,0,0,.35);transform:translateZ(0)}
-  .ham:active{transform:scale(.98)}
-  .badge{display:inline-block;background:#ffd700;color:#000;padding:6px 10px;border-radius:999px;font-weight:800}
-  .row{display:flex;gap:10px;flex-wrap:wrap}
-  .grow{flex:1}
-  .footer{position:fixed;left:0;right:0;bottom:0;padding:10px;background:transparent;border-top:1px solid #ffffff1c;display:flex;justify-content:center;backdrop-filter:blur(6px)}
-  .tab{flex:0 0 auto;padding:10px 14px;border-radius:12px;background:#ffffff18;color:#fff;font-weight:700}
-  .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#ffffff18;border:1px solid #ffffff2a}
+:root{--bg:#071026;--card:rgba(255,255,255,0.04);--accent:#3b9af7;--muted:rgba(255,255,255,.6)}
+html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#021026,#071026);color:#eaf2ff}
+.container{max-width:460px;margin:10px auto;border-radius:16px;overflow:hidden;box-shadow:0 12px 40px rgba(2,6,23,.7);background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))}
+.header{display:flex;align-items:center;justify-content:space-between;padding:14px}
+.profile{display:flex;gap:12px;align-items:center}
+.avatar{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,#ffd1a9,#ff8a8a);display:flex;align-items:center;justify-content:center;font-size:28px}
+.points{background:linear-gradient(90deg,#174bff,#00e0a8);padding:8px 12px;border-radius:999px;color:#fff;font-weight:700}
+.main{padding:12px}
+.card{background:var(--card);padding:12px;border-radius:12px;margin-bottom:10px}
+.center-card{display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px;border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))}
+.btn{padding:10px 14px;border-radius:12px;border:none;background:linear-gradient(90deg,#4b8bff,#00d3a0);color:#fff;font-weight:700;cursor:pointer}
+.row{display:flex;gap:8px}
+.leaderboard{max-height:260px;overflow:auto}
+.tabbar{display:flex;justify-content:space-around;padding:10px;background:linear-gradient(180deg,rgba(0,0,0,0.12),rgba(0,0,0,0.06));position:sticky;bottom:0}
+.tab{flex:1;padding:10px 6px;text-align:center;color:var(--muted);cursor:pointer}
+.tab.active{color:#fff}
+.small{font-size:13px;color:var(--muted)}
+.footer-links{display:flex;gap:8px;justify-content:center;padding:8px}
+@media (max-width:480px){.container{margin:6px;border-radius:10px}}
 </style>
 </head>
 <body>
-<canvas id="bgCanvas"></canvas>
-
-<div class="container">
+<div class="container" id="app">
   <div class="header">
     <div class="profile">
-      <div class="avatar">🐹</div>
+      <div class="avatar" id="avatar">😺</div>
       <div>
-        <div style="font-weight:800">User: ${uid}</div>
-        <div class="sub" id="hashText">Hashrate: ${user.hashrate || 1}x</div>
+        <div style="font-weight:800" id="userId">User: ${uid}</div>
+        <div class="small" id="userMeta">Rank: — • Level: —</div>
       </div>
     </div>
-    <div class="pointsTop" id="ptsTop">${user.points} ✨</div>
+    <div class="points" id="points">${user.points} ✨</div>
   </div>
 
-  <div class="main" id="scroll">
-    <!-- HOME / MINING ONLY PAGE -->
-    <div id="home">
-      <div class="card center">
-        <div id="ptsBig" class="badge" style="margin-bottom:8px">${user.points} ✨</div>
-        <div id="ham" class="ham" title="Klik untuk mining">🐹</div>
-        <div class="sub">Klik hamster untuk menambang</div>
-        <div id="hashInfo" class="sub" style="margin:8px 0">Hashrate: ${user.hashrate || 1}x</div>
-        <button id="btnUp" class="btn">Upgrade Hashrate (nonton iklan)</button>
-      </div>
-
-      <div class="row">
-        <div class="card grow">
-          <div class="pill">🎬 <b>Watch Ads</b></div>
-          <div class="sub">Maksimal 20 iklan per hari</div>
-          <div style="margin-top:8px"><button class="btn" onclick="watchAds()">Tonton Iklan</button></div>
-        </div>
-
-        <div class="card grow">
-          <div class="pill">📅 <b>Daily Login</b></div>
-          <div class="sub">1x setiap 24 jam</div>
-          <div style="margin-top:8px"><button id="btnDaily" class="btn">Claim Harian (+500)</button></div>
+  <div class="main" id="content">
+    <!-- Home Tab by default -->
+    <div id="homeTab">
+      <div class="card center-card">
+        <div style="font-size:13px;color:#9fb6ff">Your Mascot</div>
+        <div style="width:140px;height:140px;border-radius:14px;background:linear-gradient(135deg,#fff1c9,#ffd6e6);display:flex;align-items:center;justify-content:center;font-size:64px">😺</div>
+        <div class="row">
+          <button class="btn" id="btnUpgrade">Upgrade</button>
+          <button class="btn" id="btnShop">Shop</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="pill">👥 <b>Invite Teman</b></div>
-        <div class="sub" style="margin-top:6px">Bagikan link berikut:</div>
-        <input id="refLink" readonly value="https://t.me/${me.username}?start=ref_${uid}" />
-      </div>
-
-      <div class="card">
-        <div class="pill">💵 <b>Withdraw</b></div>
-        <div class="sub" style="margin-top:6px">Minimal 10.000 poin. Poin akan dipotong saat pengajuan.</div>
-        <input id="wdName" placeholder="Nama lengkap" />
-        <input id="wdDana" placeholder="No. DANA" />
-        <input id="wdAmt" placeholder="Minimal 10000 poin" />
-        <button id="btnWd" class="btn">Ajukan Withdraw</button>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:700">Quests</div>
+          <div class="small">Complete to earn</div>
+        </div>
+        <div style="margin-top:10px">
+          <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:700">🎬 Watch Ads</div>
+              <div class="small">Tonton iklan untuk mendapat poin</div>
+            </div>
+            <div><button class="btn" onclick="startWatch()">Tonton</button></div>
+          </div>
+          <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:700">🔗 Invite</div>
+              <div class="small">Ajak teman via referral</div>
+            </div>
+            <div><button class="btn" onclick="shareRef()">Share</button></div>
+          </div>
+          <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:700">🎁 Daily login</div>
+              <div class="small">Klaim hadiah harian (sekali/hari)</div>
+            </div>
+            <div><button class="btn" onclick="claimDaily()">Claim</button></div>
+          </div>
+        </div>
       </div>
     </div>
+
+    <!-- Quest Tab -->
+    <div id="questTab" style="display:none">
+      <div class="card">
+        <div style="font-weight:700">Tasks</div>
+        <div class="small" style="margin-top:8px">Selesaikan tugas untuk mendapatkan poin</div>
+      </div>
+      <div id="questList"></div>
+    </div>
+
+    <!-- Leaderboard Tab -->
+    <div id="leaderboardTab" style="display:none">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:700">Leaderboard</div>
+          <div class="small">Top 10</div>
+        </div>
+        <div class="leaderboard" id="leaderboardList" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <!-- Wallet Tab -->
+    <div id="walletTab" style="display:none">
+      <div class="card">
+        <div style="font-weight:700">Wallet</div>
+        <div class="small">Saldo dan riwayat transaksi</div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div class="small">Saldo</div><div style="font-weight:800" id="walletPoints">${user.points} ✨</div></div>
+          <div><button class="btn" onclick="doWithdraw()">Withdraw</button></div>
+        </div>
+      </div>
+      <div id="history" class="card small">Memuat riwayat...</div>
+    </div>
+
   </div>
 
-  <div class="footer">
-    <div class="tab">⛏️ Mining</div>
+  <div class="tabbar">
+    <div class="tab active" id="tabHome" onclick="switchTab('home')">Home</div>
+    <div class="tab" id="tabQuest" onclick="switchTab('quest')">Quest</div>
+    <div class="tab" id="tabLead" onclick="switchTab('leaderboard')">Leaderboard</div>
+    <div class="tab" id="tabWallet" onclick="switchTab('wallet')">Wallet</div>
   </div>
 </div>
 
 <script>
-// ============ PARTICLE BACKGROUND ============
-const c = document.getElementById('bgCanvas');
-const ctx = c.getContext('2d',{alpha:true});
-let W,H,particles=[];
-function resize(){W=window.innerWidth;H=window.innerHeight;c.width=W;c.height=H}
-function rand(min,max){return Math.random()*(max-min)+min}
-function initParticles(){
-  particles = Array.from({length: Math.min(120, Math.floor(W*H/12000))}, ()=>({
-    x: rand(0,W), y: rand(0,H),
-    vx: rand(-.6,.6), vy: rand(-.6,.6),
-    r: rand(1.2,2.6),
-    hue: rand(0,360)
-  }));
-}
-function step(){
-  ctx.clearRect(0,0,W,H);
-  for(const p of particles){
-    p.x += p.vx; p.y += p.vy; p.hue += .2;
-    if(p.x<0||p.x>W) p.vx*=-1;
-    if(p.y<0||p.y>H) p.vy*=-1;
-    ctx.beginPath();
-    ctx.fillStyle = \`hsla(\${p.hue},85%,65%,.85)\`;
-    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-    ctx.fill();
-  }
-  requestAnimationFrame(step);
-}
-window.addEventListener('resize', ()=>{resize(); initParticles()});
-resize(); initParticles(); step();
-
-// ============ UI / API ============
 const UID = "${uid}";
-function smoothCount(el, from, to){
-  const diff = to - from;
-  if (diff === 0) return;
-  const steps = 24;
-  const inc = diff / steps;
-  let cur = from, i = 0;
-  const timer = setInterval(()=>{
-    i++; cur += inc;
-    if(i>=steps){cur=to; clearInterval(timer);}
-    el.textContent = Math.round(cur) + " ✨";
-  }, 45);
+
+function switchTab(t){
+  document.getElementById('homeTab').style.display = t==='home' ? '' : 'none';
+  document.getElementById('questTab').style.display = t==='quest' ? '' : 'none';
+  document.getElementById('leaderboardTab').style.display = t==='leaderboard' ? '' : 'none';
+  document.getElementById('walletTab').style.display = t==='wallet' ? '' : 'none';
+  ['tabHome','tabQuest','tabLead','tabWallet'].forEach(x=>document.getElementById(x).classList.remove('active'));
+  if(t==='home') document.getElementById('tabHome').classList.add('active');
+  if(t==='quest') document.getElementById('tabQuest').classList.add('active');
+  if(t==='leaderboard') document.getElementById('tabLead').classList.add('active');
+  if(t==='wallet') document.getElementById('tabWallet').classList.add('active');
+
+  if(t==='leaderboard') loadLeaderboard();
+  if(t==='quest') loadQuests();
+  if(t==='wallet') loadHistory();
 }
 
-async function refreshUser(){
+async function refreshPoints(){
   const r = await fetch('/api/user/'+UID).then(r=>r.json()).catch(()=>null);
-  if(!r) return;
-  const top = document.getElementById('ptsTop');
-  const big = document.getElementById('ptsBig');
-  const prev = parseInt((top.textContent||'0'));
-  smoothCount(top, prev, r.points||0);
-  big.textContent = (r.points||0) + " ✨";
-  document.getElementById('hashInfo').textContent = "Hashrate: " + (r.hashrate||1) + "x";
-  document.getElementById('hashText').textContent = "Hashrate: " + (r.hashrate||1) + "x";
+  if(r && r.points!==undefined){
+    document.getElementById('points').textContent = r.points + ' ✨';
+    document.getElementById('walletPoints').textContent = r.points + ' ✨';
+  }
 }
 
-document.getElementById('ham').onclick = async ()=>{
-  const r = await fetch('/api/mining/'+UID, {method:'POST'}).then(r=>r.json()).catch(()=>null);
-  if(r && r.success){
-    const el = document.getElementById('ptsBig');
-    el.animate([{transform:'scale(1)'},{transform:'scale(1.1)'},{transform:'scale(1)'}],{duration:220});
-    await refreshUser();
+async function loadLeaderboard(){
+  const d = await fetch('/api/leaderboard').then(r=>r.json()).catch(()=>[]);
+  const el = document.getElementById('leaderboardList');
+  el.innerHTML = '';
+  d.forEach((u,i)=>{
+    const div = document.createElement('div'); div.className='card';
+    div.innerHTML = '<div style="display:flex;gap:10px;align-items:center"><div style="width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:700">'+(i+1)+'</div><div><div style="font-weight:700">'+u.user_id+'</div><div class="small">'+u.points+' pts</div></div></div>';
+    el.appendChild(div);
+  });
+}
+
+async function loadQuests(){
+  const list = document.getElementById('questList');
+  list.innerHTML = '';
+  list.appendChild(createQuestNode('🎬 Watch Ads','Tonton iklan untuk mendapat poin', 'Tonton', startWatch));
+  list.appendChild(createQuestNode('🔗 Invite','Ajak teman via referral', 'Share', shareRef));
+  list.appendChild(createQuestNode('🎁 Daily login','Claim hadiah harian (1x/day)', 'Claim', claimDaily));
+}
+
+function createQuestNode(title,desc,btnTxt,onclick){
+  const wrapper = document.createElement('div'); wrapper.className='card';
+  wrapper.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center"><div><div style="font-weight:700">'+title+'</div><div class="small">'+desc+'</div></div><div></div></div>';
+  const btn = document.createElement('button'); btn.className='btn'; btn.textContent = btnTxt; btn.onclick = onclick;
+  wrapper.querySelector('div > div:last-child').appendChild(btn);
+  return wrapper;
+}
+
+async function loadHistory(){
+  const r = await fetch('/api/user/'+UID).then(r=>r.json()).catch(()=>null);
+  const h = (r && r.history) ? r.history : [];
+  const el = document.getElementById('history');
+  el.innerHTML = h.length ? ('<div style="display:flex;flex-direction:column;gap:6px">'+h.slice().reverse().map(x=>'<div>'+x+'</div>').join('')+'</div>') : '<div class="small">Belum ada riwayat</div>';
+}
+
+function startWatch(){
+  // open /watch in new tab (redirect back to telegram after done)
+  window.open('/watch?user_id='+UID, '_blank');
+}
+
+function shareRef(){
+  const refLink = 'https://t.me/' + (window.location.hostname) + '?start=ref_' + UID;
+  if(navigator.share){
+    navigator.share({title:'Ayo main', text:'Main dan dapat poin', url:refLink});
   } else {
-    alert(r?.error||'Gagal mining');
+    prompt('Copy referral link', refLink);
   }
-};
-
-document.getElementById('btnUp').onclick = async ()=>{
-  window.location.href = "/watch?user_id="+UID+"&mode=upgrade";
-};
-
-document.getElementById('btnDaily').onclick = async ()=>{
-  const r = await fetch('/api/daily/'+UID, {method:'POST'}).then(r=>r.json()).catch(()=>null);
-  if(r && r.success){ 
-    alert("Daily claimed: +"+r.reward); 
-    refreshUser(); 
-  } else alert(r?.error || "Gagal claim");
-};
-
-document.getElementById('btnWd').onclick = async ()=>{
-  const name = document.getElementById('wdName').value.trim();
-  const dana = document.getElementById('wdDana').value.trim();
-  const amt = parseInt(document.getElementById('wdAmt').value.trim() || '0', 10);
-  if(!name || !dana || !amt){ alert('Lengkapi form'); return; }
-  const r = await fetch('/api/withdraw_direct', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ user_id: UID, name, dana_number: dana, amount: amt })
-  }).then(r=>r.json()).catch(()=>null);
-  if(r && r.success){ alert('Withdraw diajukan. Menunggu approve admin.'); refreshUser(); }
-  else alert(r?.error||'Gagal ajukan');
-};
-
-function watchAds(){ window.location.href = "/watch?user_id="+UID; }
-
-// Placeholder nominal hilang saat ketik, muncul bila kosong (default browser sudah begitu untuk placeholder).
-// Tambahan: blok input hanya angka
-document.getElementById('wdAmt').addEventListener('input', (e)=>{
-  e.target.value = e.target.value.replace(/[^0-9]/g,'');
-});
-</script>
-</body></html>`);
-});
-
-// ====================== WATCH PAGE (IKLAN) ======================
-// Pakai ads aktif (iframe) ATAU fallback Gigapub (window.showGiga)
-app.get("/watch", async (req, res) => {
-  const user_id = String(req.query.user_id || "").trim();
-  const mode = String(req.query.mode || "watch"); // "watch" biasa atau "upgrade"
-  if (!user_id) return res.status(400).send("Missing user_id");
-
-  await getUser(user_id);
-  const todayCount = await countViewsToday(user_id);
-  if (todayCount >= 20 && mode !== "upgrade") {
-    return res.type("html").send("<h3 style='font-family:system-ui'>❌ Batas 20 iklan per hari sudah tercapai</h3>");
-  }
-
-  const ad = await getActiveAd(); // dari tabel ads
-  const reward = ad ? ad.reward : 10;
-
-  res.type("html").send(`<!doctype html>
-<html>
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Watch Ads</title>
-<style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;background:#0b0b12;margin:0;padding:16px;color:#fff}
-  .card{background:#ffffff10;border:1px solid #ffffff22;border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.25);margin:10px 0;backdrop-filter:blur(10px)}
-  .btn{padding:12px 16px;border:none;border-radius:12px;background:linear-gradient(135deg,#7d5fff,#74b9ff);color:#fff;cursor:pointer;font-weight:700}
-  .sub{color:#d3d3d3;font-size:13px}
-  iframe{border:none;width:100%;height:320px;border-radius:12px;background:#000}
-</style>
-${ad ? "" : `<script src="https://ad.gigapub.tech/script?id=1669"></script>`}
-</head>
-<body>
-  <h3>🎬 Tonton Iklan</h3>
-  <div class="card">
-    <div class="sub">${ad ? "Iklan: <b>"+ad.title+"</b>" : "Iklan Gigapub"}</div>
-    <div id="adbox">
-      ${ad ? `<iframe src="${ad.url}" allow="autoplay; encrypted-media"></iframe>` 
-            : `<div id="gigabox" style="height:320px;display:flex;align-items:center;justify-content:center;background:#000;color:#fff;border-radius:12px">Menunggu iklan...</div>`}
-    </div>
-    <div class="sub" style="margin-top:8px">Hadiah: ${reward} poin ${mode==='upgrade' ? "(upgrade hashrate)" : ""}</div>
-    <div style="margin-top:10px">
-      <button id="btn" class="btn" disabled>⏳ Tunggu iklan selesai...</button>
-    </div>
-  </div>
-<script>
-const user_id = ${JSON.stringify(user_id)};
-const mode = ${JSON.stringify(mode)};
-const reward = ${reward};
-
-function enableBtn(){
-  const b = document.getElementById('btn');
-  b.disabled=false; 
-  b.textContent = mode==='upgrade' ? '✅ Upgrade Hashrate' : '✅ Klaim '+reward+' Poin';
-  b.onclick = async ()=>{
-    if(mode==='upgrade'){
-      const r = await fetch('/api/upgrade/'+user_id,{method:'POST'}).then(r=>r.json()).catch(()=>null);
-      if(r && r.success){ alert('Hashrate +1 ditambahkan'); window.history.back(); }
-      else alert(r?.error||'Gagal upgrade');
-    } else {
-      const r = await fetch('/reward?user_id='+encodeURIComponent(user_id)+'&reward='+encodeURIComponent(reward)).then(r=>r.text()).catch(()=>null);
-      alert(r||'Selesai');
-      window.history.back();
-    }
-  };
 }
 
-${ad 
-  ? `// Iklan via iframe -> anggap selesai setelah 15 detik
-     setTimeout(enableBtn,15000);`
-  : `// Iklan via Gigapub -> tombol aktif saat showGiga resolve
-     window.showGiga()
-       .then(()=>enableBtn())
-       .catch(e=>{document.getElementById('gigabox').textContent='❌ Gagal load iklan: '+e});`}
+async function claimDaily(){
+  // server-side simple daily grant (guard on server may be minimal — DB should enforce real cooldowns if desired)
+  const r = await fetch('/api/trigger/'+UID+'?cmd=daily').then(r=>r.json()).catch(()=>null);
+  if(r && r.success) { alert('Daily diklaim'); refreshPoints(); } else alert('Gagal klaim atau sudah klaim hari ini');
+}
+
+async function doWithdraw(){
+  const dana = prompt('Masukkan nomor DANA untuk withdraw (min 10000 poin)');
+  if(!dana) return;
+  const body = { user_id: UID, dana_number: dana };
+  const r = await fetch('/api/withdraw_direct', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  if(r.ok){ alert('Withdraw request terkirim'); refreshPoints(); } else { alert('Gagal kirim withdraw'); }
+}
+
+// initial load
+refreshPoints();
+loadLeaderboard();
+
 </script>
-</body></html>`);
+</body>
+</html>`);
 });
 
-// ====================== PUBLIC API (MINI APP) ======================
+// ====================== APIs for WebApp ======================
 
-// Ambil data user
-app.get("/api/user/:id", async (req, res) => {
-  const user = await getUser(req.params.id);
-  res.json(user);
+// fetch user -> include history to show in wallet
+app.get('/api/user/:id', async (req, res) => {
+  const id = req.params.id;
+  const u = await getUser(id);
+  if (!u) return res.status(404).json({ error: 'not found' });
+  res.json({
+    user_id: u.user_id,
+    points: u.points,
+    history: u.history || [],
+    ref_by: u.ref_by || null,
+    created_at: u.created_at || null,
+  });
 });
 
-// Mining klik hamster
-app.post("/api/mining/:id", async (req, res) => {
-  const uid = req.params.id;
-  const u = await getUser(uid);
-  const reward = 100 * (u.hashrate || 1);
-  await updatePoints(uid, reward, `Mining +${reward} (${nowLocal()})`);
-  res.json({ success: true, reward });
+// leaderboard
+app.get('/api/leaderboard', async (_req, res) => {
+  const r = await pool.query("SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10");
+  res.json(r.rows);
 });
 
-// Upgrade via iklan (dipanggil dari /watch?mode=upgrade)
-app.post("/api/upgrade/:id", async (req, res) => {
-  const uid = req.params.id;
-  const u = await getUser(uid);
-  const newH = (u.hashrate || 1) + 1;
-  await pool.query("UPDATE users SET hashrate=$1 WHERE user_id=$2", [newH, uid]);
-  res.json({ success: true, newHashrate: newH });
-});
-
-// Daily login 1x/24 jam
-app.post("/api/daily/:id", async (req, res) => {
-  const uid = req.params.id;
-  const u = await getUser(uid);
-  if (u.last_daily && new Date() - new Date(u.last_daily) < 24 * 60 * 60 * 1000) {
-    return res.json({ error: "Sudah claim hari ini" });
+// server-side trigger for small actions (daily)
+app.get('/api/trigger/:uid', async (req, res) => {
+  const uid = req.params.uid;
+  const cmd = req.query.cmd;
+  if (!['daily'].includes(cmd)) return res.status(400).json({ error: 'bad cmd' });
+  try {
+    if (cmd === 'daily') {
+      // implement simple once-per-day check via history timestamp (lightweight)
+      const u = await getUser(uid);
+      const today = (new Date()).toDateString();
+      const hist = (u.history || []).slice(-10).join('||');
+      if (hist.includes('daily:'+today)) {
+        return res.status(400).json({ error: 'already claimed' });
+      }
+      const reward = 100;
+      await updatePoints(uid, reward, `+${reward} daily (webapp) (${nowLocal()})`);
+      // append a marker so next claim detects
+      await pool.query("UPDATE users SET history = array_append(history, $1) WHERE user_id=$2", [`daily:${today}`, uid]);
+    }
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
-  await updatePoints(uid, 500, `Daily +500 (${nowLocal()})`);
-  await pool.query("UPDATE users SET last_daily=$1 WHERE user_id=$2", [new Date(), uid]);
-  res.json({ success: true, reward: 500 });
 });
 
-// Reward iklan (max 20/day)
-app.get("/reward", async (req, res) => {
-  const user_id = String(req.query.user_id || "").trim();
-  const reward = parseInt(req.query.reward || "10", 10);
-  if (!user_id) return res.send("Missing user_id");
-
-  const today = await countViewsToday(user_id);
-  if (today >= 20) return res.send("❌ Batas 20 iklan per hari sudah tercapai");
-
-  await updatePoints(user_id, reward, `+${reward} poin (watch) (${nowLocal()})`);
-  await pool.query("INSERT INTO ad_views(user_id) VALUES($1)", [user_id]);
-  res.send("✅ Reward diberikan");
-});
-
-// Withdraw
-app.post("/api/withdraw_direct", async (req, res) => {
-  const { user_id, name, dana_number, amount } = req.body || {};
-  if (!user_id || !name || !dana_number || !amount) {
-    return res.json({ error: "Data tidak lengkap" });
-  }
-  const amt = parseInt(amount, 10);
+// create withdraw request from WebApp
+app.post('/api/withdraw_direct', express.json(), async (req, res) => {
+  const { user_id, dana_number } = req.body || {};
+  if (!user_id || !dana_number) return res.status(400).json({ error: 'bad params' });
   const u = await getUser(user_id);
-  if (amt < 10000) return res.json({ error: "Minimal withdraw 10000 poin" });
-  if (u.points < amt) return res.json({ error: "Saldo tidak cukup" });
-  await updatePoints(user_id, -amt, `Withdraw request -${amt} (${nowLocal()})`);
-  await pool.query(
-    "INSERT INTO withdraw_requests(user_id,name,dana_number,amount,status) VALUES($1,$2,$3,$4,'pending')",
-    [user_id, name, dana_number, amt]
+  if (!u) return res.status(404).json({ error: 'user not found' });
+  const amount = u.points || 0;
+  await pool.query("INSERT INTO withdraw_requests (user_id, amount, dana_number, status) VALUES ($1,$2,$3,$4)", [user_id, amount, dana_number, 'pending']);
+  await pool.query("UPDATE users SET points=0 WHERE user_id=$1", [user_id]);
+  if (ADMIN_ID) {
+    try { bot.sendMessage(ADMIN_ID, `📥 Withdraw WebApp\nUser: ${user_id}\nJumlah: ${amount}\nDANA: ${dana_number}`); } catch(e){}
+  }
+  res.json({ success: true });
+});
+
+// bot info (optional)
+app.get('/botinfo', async (_req, res) => {
+  const me = await bot.getMe();
+  res.json(me);
+});
+
+// ====================== ADMIN API (same as before) ======================
+function guard(req, res) {
+  if (req.query.key !== ADMIN_KEY) {
+    res.status(401).json({ error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+// Users
+app.get("/api/users", async (req, res) => {
+  if (!guard(req, res)) return;
+  try {
+    const r = await pool.query(
+      "SELECT user_id,points,history,ref_by,created_at FROM users ORDER BY user_id DESC"
+    );
+    res.json(r.rows);
+  } catch (_e) {
+    const r = await pool.query(
+      "SELECT user_id,points,history FROM users ORDER BY user_id DESC"
+    );
+    res.json(r.rows);
+  }
+});
+app.post("/api/user/:id/points", async (req, res) => {
+  if (!guard(req, res)) return;
+  const user_id = parseInt(req.params.id, 10);
+  const delta = parseInt(req.body?.delta || 0, 10);
+  if (!user_id || !delta) return res.status(400).json({ error: "Bad params" });
+  await updatePoints(
+    user_id,
+    delta,
+    `${delta >= 0 ? "+" : ""}${delta} by admin (${nowLocal()})`
   );
   res.json({ success: true });
 });
-
-// Leaderboard endpoint dihapus dari UI (opsional masih bisa dipakai)
-// app.get("/api/leaderboard", ... ) // tidak dipakai karena single page mining
-
-// ====================== ADMIN API & PANEL ======================
-
-// List users (admin)
-app.get("/api/users", async (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
-  const q = await pool.query("SELECT * FROM users ORDER BY points DESC LIMIT 200");
-  res.json(q.rows);
-});
-
-// List withdraws (admin)
-app.get("/api/withdraws", async (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
-  const q = await pool.query("SELECT * FROM withdraw_requests ORDER BY id DESC LIMIT 200");
-  res.json(q.rows);
-});
-
-// Update withdraw status (approve/reject)
-app.post("/api/withdraws/:id", async (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
-  const id = parseInt(req.params.id, 10);
-  const status = (req.body && req.body.status) || "";
-  if (!["approved", "rejected", "pending"].includes(status)) return res.json({ error: "status invalid" });
-  await pool.query("UPDATE withdraw_requests SET status=$1 WHERE id=$2", [status, id]);
+app.post("/api/user/:id/reset", async (req, res) => {
+  if (!guard(req, res)) return;
+  const user_id = parseInt(req.params.id, 10);
+  await pool.query("UPDATE users SET points=0 WHERE user_id=$1", [user_id]);
+  await updatePoints(user_id, 0, `reset by admin (${nowLocal()})`);
   res.json({ success: true });
 });
 
-// ADS CRUD (admin)
-app.get("/api/ads", async (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
-  const q = await pool.query("SELECT * FROM ads ORDER BY id DESC");
-  res.json(q.rows);
+// Withdraws
+app.get("/api/withdraws", async (req, res) => {
+  if (!guard(req, res)) return;
+  const r = await pool.query(
+    "SELECT * FROM withdraw_requests ORDER BY id DESC"
+  );
+  res.json(r.rows);
+});
+app.post("/api/withdraws/:id", async (req, res) => {
+  if (!guard(req, res)) return;
+  const id = parseInt(req.params.id, 10);
+  const st = (req.body?.status || "").toLowerCase();
+  if (!["approved", "rejected", "pending"].includes(st))
+    return res.status(400).json({ error: "Bad status" });
+
+  await pool.query("UPDATE withdraw_requests SET status=$1 WHERE id=$2", [
+    st,
+    id,
+  ]);
+
+  // notify user
+  const r = await pool.query("SELECT user_id, amount, dana_number FROM withdraw_requests WHERE id=$1", [id]);
+  if (r.rows.length) {
+    const wd = r.rows[0];
+    if (st === "approved") {
+      try {
+        bot.sendMessage(
+          wd.user_id,
+          `✅ Withdraw kamu sebesar ${wd.amount} poin ke ${wd.dana_number} sudah *disetujui*.`
+        );
+      } catch (e) {}
+    } else if (st === "rejected") {
+      try {
+        bot.sendMessage(
+          wd.user_id,
+          `❌ Withdraw kamu sebesar ${wd.amount} poin ke ${wd.dana_number} *ditolak*.`
+        );
+      } catch (e) {}
+    }
+  }
+
+  res.json({ success: true });
+});
+
+// Ads (public GET; admin-protected POST/PUT/DELETE)
+app.get("/api/ads", async (_req, res) => {
+  const r = await pool.query("SELECT * FROM ads ORDER BY id DESC");
+  res.json(r.rows);
 });
 app.post("/api/ads", async (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
-  const { title, url, reward = 10, status = "active" } = req.body || {};
-  if (!title || !url) return res.json({ error: "title & url required" });
-  await pool.query("INSERT INTO ads(title,url,reward,status) VALUES($1,$2,$3,$4)", [title, url, reward, status]);
-  res.json({ success: true });
+  if (!guard(req, res)) return;
+  const { title, url, reward, status } = req.body || {};
+  if (!title || !url) return res.status(400).json({ error: "Bad params" });
+  const r = await pool.query(
+    "INSERT INTO ads (title,url,reward,status) VALUES ($1,$2,$3,$4) RETURNING *",
+    [title, url, reward || 10, status || "active"]
+  );
+  res.json(r.rows[0]);
 });
 app.put("/api/ads/:id", async (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
-  const id = parseInt(req.params.id, 10);
+  if (!guard(req, res)) return;
+  const { id } = req.params;
   const { title, url, reward, status } = req.body || {};
-  await pool.query(
-    "UPDATE ads SET title=$1,url=$2,reward=$3,status=$4 WHERE id=$5",
-    [title, url, reward, status, id]
+  if (!title || !url) return res.status(400).json({ error: "Bad params" });
+  const r = await pool.query(
+    "UPDATE ads SET title=$1,url=$2,reward=$3,status=$4 WHERE id=$5 RETURNING *",
+    [title, url, reward || 10, status || "active", id]
   );
-  res.json({ success: true });
+  res.json(r.rows[0]);
 });
 app.delete("/api/ads/:id", async (req, res) => {
-  if (req.query.key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
-  const id = parseInt(req.params.id, 10);
-  await pool.query("DELETE FROM ads WHERE id=$1", [id]);
+  if (!guard(req, res)) return;
+  await pool.query("DELETE FROM ads WHERE id=$1", [req.params.id]);
   res.json({ success: true });
 });
 
-// ADMIN PANEL (HTML) — Mining Monitor
+// Export CSV
+app.get("/export", async (req, res) => {
+  if (!guard(req, res)) return;
+  const r = await pool.query("SELECT * FROM users");
+  const data = r.rows.map((u) => ({
+    user_id: u.user_id,
+    points: u.points,
+    ref_by: u.ref_by || "",
+    created_at: u.created_at || "",
+    history: (u.history || []).join("; "),
+  }));
+  const parser = new Parser({
+    fields: ["user_id", "points", "ref_by", "created_at", "history"],
+  });
+  const csv = parser.parse(data);
+  res.header("Content-Type", "text/csv");
+  res.attachment("users.csv");
+  res.send(csv);
+});
+
+// ====================== ADMIN PANEL (HTML) ======================
 app.get("/admin", (req, res) => {
   if (req.query.key !== ADMIN_KEY) return res.status(401).send("❌ Unauthorized");
   res.type("html").send(`<!DOCTYPE html>
@@ -598,13 +722,16 @@ app.get("/admin", (req, res) => {
   <button id='btn-users' onclick="showTab('users')">👤 Users</button>
   <button id='btn-ads' onclick="showTab('ads')">🎬 Ads</button>
   <button id='btn-withdraws' onclick="showTab('withdraws')">💵 Withdraws</button>
-  <button id='btn-mining' onclick="showTab('mining')">⛏️ Mining Monitor</button>
+  <button id='btn-quizzes' onclick="showTab('quizzes')">❓ Quizzes</button>
+  <a id="btn-export" href="#" style="margin-left:6px;text-decoration:none">
+    <button>⬇️ Export CSV</button>
+  </a>
 </nav>
 
 <div id='tab-users' class='wrap'></div>
 <div id='tab-ads' class='wrap' style='display:none'></div>
 <div id='tab-withdraws' class='wrap' style='display:none'></div>
-<div id='tab-mining' class='wrap' style='display:none'></div>
+<div id='tab-quizzes' class='wrap' style='display:none'></div>
 
 <script>
 function getKey(){return new URLSearchParams(location.search).get('key')||''}
@@ -614,14 +741,15 @@ function setActive(id){
   const btn=document.getElementById('btn-'+id); if(btn) btn.classList.add('active');
 }
 function showTab(id){
-  ['users','ads','withdraws','mining'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
+  ['users','ads','withdraws','quizzes'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
   setActive(id);
   document.getElementById('tab-'+id).style.display='block';
   if(id==='users') renderUsers();
   if(id==='ads') renderAds();
   if(id==='withdraws') renderWithdraws();
-  if(id==='mining') renderMining();
+  if(id==='quizzes') renderQuizzes();
 }
+document.getElementById('btn-export').href='/export?key='+encodeURIComponent(getKey());
 
 // ===== USERS
 async function renderUsers(){
@@ -633,14 +761,35 @@ async function renderUsers(){
     let rows=(u||[]).map(x=>\`<tr>
       <td>\${x.user_id}</td>
       <td>\${x.points}</td>
-      <td>\${x.hashrate||1}x</td>
+      <td><button onclick="showHist(\${JSON.stringify(String(x.user_id))})">Lihat (\${x.history?x.history.length:0})</button></td>
+      <td>\${x.ref_by??'-'}</td>
       <td>\${x.created_at||'-'}</td>
+      <td class="actions">
+        <button onclick="adjPts(\${JSON.stringify(String(x.user_id))},10)">+10</button>
+        <button onclick="adjPts(\${JSON.stringify(String(x.user_id))},-10)">-10</button>
+        <button onclick="resetPts(\${JSON.stringify(String(x.user_id))})">Reset</button>
+      </td>
     </tr>\`).join('');
-    if(!rows) rows='<tr><td colspan=4 class=muted>Kosong</td></tr>';
-    box.innerHTML='<h3>👤 Users</h3><table><thead><tr><th>User</th><th>Poin</th><th>Hashrate</th><th>Created</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    if(!rows) rows='<tr><td colspan=6 class=muted>Kosong</td></tr>';
+    box.innerHTML='<h3>👤 Users</h3><table><thead><tr><th>User ID</th><th>Poin</th><th>Riwayat</th><th>Ref By</th><th>Created</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }catch(e){
     box.innerHTML='<div class="card" style="color:red">⚠️ Gagal load users: '+e.message+'</div>';
   }
+}
+async function adjPts(uid,delta){
+  await api('/api/user/'+uid+'/points',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delta})});
+  renderUsers();
+}
+async function resetPts(uid){
+  await api('/api/user/'+uid+'/reset',{method:'POST'});
+  renderUsers();
+}
+async function showHist(uid){
+  try{
+    const r=await api('/api/users'); const u=await r.json();
+    const me=(u||[]).find(v=>String(v.user_id)===String(uid));
+    alert((me?.history||[]).join('\\n')||'Tidak ada riwayat');
+  }catch(_){alert('Tidak bisa memuat riwayat');}
 }
 
 // ===== ADS
@@ -648,7 +797,7 @@ async function renderAds(){
   const box=document.getElementById('tab-ads');
   box.innerHTML='<div class="card">📊 Memuat ads...</div>';
   try{
-    const r=await api('/api/ads'); if(!r.ok) throw new Error('HTTP '+r.status);
+    const r=await fetch('/api/ads'); if(!r.ok) throw new Error('HTTP '+r.status);
     const ads=await r.json();
     let rows=(ads||[]).map(a=>\`<tr>
       <td>\${a.id}</td><td>\${a.title}</td><td>\${a.url}</td><td>\${a.reward}</td><td>\${a.status}</td>
@@ -664,7 +813,7 @@ async function renderAds(){
       '<div class="card">'+
         '<div class="row">'+
           '<input id="ad-title" placeholder="Judul" />'+
-          '<input id="ad-url" placeholder="Script/Video URL" style="min-width:260px" />'+
+          '<input id="ad-url" placeholder="Script URL" style="min-width:260px" />'+
           '<input id="ad-reward" type="number" placeholder="Reward" value="10" />'+
           '<select id="ad-status"><option value="active">active</option><option value="paused">paused</option></select>'+
           '<button onclick="addAd()">Tambah</button>'+
@@ -685,7 +834,7 @@ async function addAd(){
   renderAds();
 }
 async function toggleAd(id,next){
-  const r=await api('/api/ads'); const ads=await r.json();
+  const r=await fetch('/api/ads'); const ads=await r.json();
   const a=ads.find(x=>x.id===id);
   if(!a){alert('Iklan tidak ditemukan');return;}
   await api('/api/ads/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:a.title,url:a.url,reward:a.reward,status:next})});
@@ -721,24 +870,49 @@ async function setWd(id,status){
   renderWithdraws();
 }
 
-// ===== MINING MONITOR
-async function renderMining(){
-  const box=document.getElementById('tab-mining');
-  box.innerHTML='<div class="card">📊 Memuat mining data...</div>';
+// ===== QUIZZES
+async function renderQuizzes(){
+  const box=document.getElementById('tab-quizzes');
+  box.innerHTML='<div class="card">📊 Memuat quizzes...</div>';
   try{
-    const r=await api('/api/users'); if(!r.ok) throw new Error('HTTP '+r.status);
-    const u=await r.json();
-    let rows=(u||[]).map(x=>\`<tr>
-      <td>\${x.user_id}</td>
-      <td>\${x.points}</td>
-      <td>\${x.hashrate||1}x</td>
-      <td>\${(x.history && x.history[0]) || '-'}</td>
+    const r=await api('/api/quizzes'); if(!r.ok) throw new Error('HTTP '+r.status);
+    const q=await r.json();
+    let rows=(q||[]).map(x=>\`<tr>
+      <td>\${x.id}</td><td>\${x.question}</td><td>\${x.answer}</td><td>\${x.reward}</td><td>\${x.active}</td><td>\${x.created_at||'-'}</td>
+      <td class="actions">
+        <button onclick="delQuiz(\${x.id})">Hapus</button>
+      </td>
     </tr>\`).join('');
-    if(!rows) rows='<tr><td colspan=4 class=muted>Kosong</td></tr>';
-    box.innerHTML='<h3>⛏️ Mining Monitor</h3><table><thead><tr><th>User</th><th>Poin</th><th>Hashrate</th><th>Last Activity</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    if(!rows) rows='<tr><td colspan=7 class=muted>Kosong</td></tr>';
+
+    box.innerHTML=
+      '<h3>❓ Quizzes</h3>'+
+      '<div class="card">'+
+        '<div class="row">'+
+          '<input id="q-question" placeholder="Pertanyaan" style="min-width:260px" />'+
+          '<input id="q-answer" placeholder="Jawaban" />'+
+          '<input id="q-reward" type="number" placeholder="Reward" value="30" />'+
+          '<select id="q-active"><option value="true">active</option><option value="false">inactive</option></select>'+
+          '<button onclick="addQuiz()">Tambah</button>'+
+        '</div>'+
+      '</div>'+
+      '<table><thead><tr><th>ID</th><th>Pertanyaan</th><th>Jawaban</th><th>Reward</th><th>Active</th><th>Created</th><th>Aksi</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }catch(e){
-    box.innerHTML='<div class="card" style="color:red">⚠️ Gagal load mining</div>';
+    box.innerHTML='<div class="card" style="color:red">⚠️ Gagal load quizzes: '+e.message+'</div>';
   }
+}
+async function addQuiz(){
+  const question=document.getElementById('q-question').value.trim();
+  const answer=document.getElementById('q-answer').value.trim();
+  const reward=parseInt(document.getElementById('q-reward').value||'30',10);
+  const active=document.getElementById('q-active').value==='true';
+  if(!question||!answer){alert('Isi pertanyaan & jawaban');return;}
+  await api('/api/quizzes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,answer,reward,active})});
+  renderQuizzes();
+}
+async function delQuiz(id){
+  await api('/api/quizzes/'+id,{method:'DELETE'});
+  renderQuizzes();
 }
 
 showTab('users');
@@ -747,7 +921,11 @@ showTab('users');
 </html>`);
 });
 
-// ====================== SERVER START ======================
-app.listen(PORT, () => {
-  console.log("✅ Server running on port", PORT);
-});
+// ====================== KEEP ALIVE ======================
+app.get("/", (_req, res) => res.send("🚀 Bot is running"));
+setInterval(() => {
+  axios.get(`https://${BASE_HOST}`).catch(() => {});
+}, 300000);
+
+// ====================== START SERVER ======================
+app.listen(PORT, () => console.log(`✅ Server running on ${PORT}`));
